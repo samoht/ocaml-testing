@@ -36,12 +36,12 @@ let lfunction params body =
 
 let lapply func args loc =
   match func with
-    Lapply(func', args', _) ->
-      Lapply(func', args' @ args, loc)
+    Lapply(func', args') ->
+      Lapply(func', args' @ args)
   | _ ->
-      Lapply(func, args, loc)
+      Lapply(func, args)
 
-let mkappl (func, args) = Lapply (func, args, Location.none);;
+let mkappl (func, args) = Lapply (func, args);;
 
 let lsequence l1 l2 =
   if l2 = lambda_unit then l1 else Lsequence(l1, l2)
@@ -495,30 +495,30 @@ let rec builtin_meths self env env2 body =
         "var", [Lvar n]
     | Lprim(Pfield n, [Lvar e]) when Ident.same e env ->
         "env", [Lvar env2; Lconst(Const_pointer n)]
-    | Lsend(Self, met, Lvar s, [], _) when List.mem s self ->
+    | Lsend(Self, met, Lvar s, []) when List.mem s self ->
         "meth", [met]
     | _ -> raise Not_found
   in
   match body with
   | Llet(_, s', Lvar s, body) when List.mem s self ->
       builtin_meths (s'::self) env env2 body
-  | Lapply(f, [arg], _) when const_path f ->
+  | Lapply(f, [arg]) when const_path f ->
       let s, args = conv arg in ("app_"^s, f :: args)
-  | Lapply(f, [arg; p], _) when const_path f && const_path p ->
+  | Lapply(f, [arg; p]) when const_path f && const_path p ->
       let s, args = conv arg in
       ("app_"^s^"_const", f :: args @ [p])
-  | Lapply(f, [p; arg], _) when const_path f && const_path p ->
+  | Lapply(f, [p; arg]) when const_path f && const_path p ->
       let s, args = conv arg in
       ("app_const_"^s, f :: p :: args)
-  | Lsend(Self, Lvar n, Lvar s, [arg], _) when List.mem s self ->
+  | Lsend(Self, Lvar n, Lvar s, [arg]) when List.mem s self ->
       let s, args = conv arg in
       ("meth_app_"^s, Lvar n :: args)
-  | Lsend(Self, met, Lvar s, [], _) when List.mem s self ->
+  | Lsend(Self, met, Lvar s, []) when List.mem s self ->
       ("get_meth", [met])
-  | Lsend(Public, met, arg, [], _) ->
+  | Lsend(Public, met, arg, []) ->
       let s, args = conv arg in
       ("send_"^s, met :: args)
-  | Lsend(Cached, met, arg, [_;_], _) ->
+  | Lsend(Cached, met, arg, [_;_]) ->
       let s, args = conv arg in
       ("send_"^s, met :: args)
   | Lfunction (Curried, [x], body) ->

@@ -1349,7 +1349,7 @@ let code_force_lazy_block =
    Forward(val_out_of_heap).
 *)
 
-let inline_lazy_force_cond arg loc =
+let inline_lazy_force_cond arg =
   let idarg = Ident.create "lzarg" in
   let varg = Lvar idarg in
   let tag = Ident.create "tag" in
@@ -1365,11 +1365,11 @@ let inline_lazy_force_cond arg loc =
                 (* ... if (tag == Obj.lazy_tag) then Lazy.force varg else ... *)
                 Lprim(Pintcomp Ceq,
                       [Lvar tag; Lconst(Const_base(Const_int Obj.lazy_tag))]),
-                Lapply(force_fun, [varg], loc),
+                Lapply(force_fun, [varg]),
                 (* ... arg *)
                   varg))))
 
-let inline_lazy_force_switch arg loc =
+let inline_lazy_force_switch arg =
   let idarg = Ident.create "lzarg" in
   let varg = Lvar idarg in
   let force_fun = Lazy.force code_force_lazy_block in
@@ -1383,7 +1383,7 @@ let inline_lazy_force_switch arg loc =
                sw_blocks =
                  [ (Obj.forward_tag, Lprim(Pfield 0, [varg]));
                    (Obj.lazy_tag,
-                    Lapply(force_fun, [varg], loc)) ];
+                    Lapply(force_fun, [varg])) ];
                sw_failaction = Some varg } ))))
 
 let inline_lazy_force =
@@ -1400,7 +1400,7 @@ let make_lazy_matching def = function
   | (arg,mut) :: argl ->
       { cases = [];
         args =
-          (inline_lazy_force arg Location.none, Strict) :: argl;
+          (inline_lazy_force arg, Strict) :: argl;
         default = make_default matcher_lazy def }
 
 let divide_lazy p ctx pm =
@@ -2515,7 +2515,7 @@ let check_total total lambda i handler_fun =
     Lstaticcatch(lambda, (i,[]), handler_fun())
   end
 
-let compile_matching loc repr handler_fun arg pat_act_list partial =
+let compile_matching repr handler_fun arg pat_act_list partial =
   let partial = check_partial pat_act_list partial in
   match partial with
   | Partial ->
@@ -2551,15 +2551,15 @@ let partial_function loc () =
                Const_base(Const_int char)]))])])
 
 let for_function loc repr param pat_act_list partial =
-  compile_matching loc repr (partial_function loc) param pat_act_list partial
+  compile_matching repr (partial_function loc) param pat_act_list partial
 
 (* In the following two cases, exhaustiveness info is not available! *)
 let for_trywith param pat_act_list =
-  compile_matching Location.none None (fun () -> Lprim(Praise, [param]))
+  compile_matching None (fun () -> Lprim(Praise, [param]))
     param pat_act_list Partial
 
 let for_let loc param pat body =
-  compile_matching loc None (partial_function loc) param [pat, body] Partial
+  compile_matching None (partial_function loc) param [pat, body] Partial
 
 (* Handling of tupled functions and matchings *)
 

@@ -188,7 +188,7 @@ let rec lam ppf = function
       Ident.print ppf id
   | Lconst cst ->
       struct_const ppf cst
-  | Lapply(lfun, largs, _) ->
+  | Lapply(lfun, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       fprintf ppf "@[<2>(apply@ %a%a)@]" lam lfun lams largs
@@ -285,7 +285,7 @@ let rec lam ppf = function
        lam hi lam body
   | Lassign(id, expr) ->
       fprintf ppf "@[<2>(assign@ %a@ %a)@]" Ident.print id lam expr
-  | Lsend (k, met, obj, largs, _) ->
+  | Lsend (k, met, obj, largs) ->
       let args ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       let kind =

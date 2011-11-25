@@ -135,7 +135,7 @@ type shared_code = (int * int) list     (* stack size -> code label *)
 type lambda =
     Lvar of Ident.t
   | Lconst of structured_constant
-  | Lapply of lambda * lambda list * Location.t
+  | Lapply of lambda * lambda list
   | Lfunction of function_kind * Ident.t list * lambda
   | Llet of let_kind * Ident.t * lambda * lambda
   | Lletrec of (Ident.t * lambda) list * lambda
@@ -149,7 +149,7 @@ type lambda =
   | Lwhile of lambda * lambda
   | Lfor of Ident.t * lambda * lambda * direction_flag * lambda
   | Lassign of Ident.t * lambda
-  | Lsend of meth_kind * lambda * lambda * lambda list * Location.t
+  | Lsend of meth_kind * lambda * lambda * lambda list
   | Levent of lambda * lambda_event
   | Lifused of Ident.t * lambda
 

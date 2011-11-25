@@ -126,7 +126,7 @@ type shared_code = (int * int) list
 type lambda =
     Lvar of Ident.t
   | Lconst of structured_constant
-  | Lapply of lambda * lambda list * Location.t
+  | Lapply of lambda * lambda list
   | Lfunction of function_kind * Ident.t list * lambda
   | Llet of let_kind * Ident.t * lambda * lambda
   | Lletrec of (Ident.t * lambda) list * lambda
@@ -140,7 +140,7 @@ type lambda =
   | Lwhile of lambda * lambda
   | Lfor of Ident.t * lambda * lambda * direction_flag * lambda
   | Lassign of Ident.t * lambda
-  | Lsend of meth_kind * lambda * lambda * lambda list * Location.t
+  | Lsend of meth_kind * lambda * lambda * lambda list
   | Levent of lambda * lambda_event
   | Lifused of Ident.t * lambda
 
@@ -172,7 +172,7 @@ let rec same l1 l2 =
       Ident.same v1 v2
   | Lconst c1, Lconst c2 ->
       c1 = c2
-  | Lapply(a1, bl1, _), Lapply(a2, bl2, _) ->
+  | Lapply(a1, bl1), Lapply(a2, bl2) ->
       same a1 a2 && samelist same bl1 bl2
   | Lfunction(k1, idl1, a1), Lfunction(k2, idl2, a2) ->
       k1 = k2 && samelist Ident.same idl1 idl2 && same a1 a2
@@ -201,7 +201,7 @@ let rec same l1 l2 =
       same b1 b2 && df1 = df2 && same c1 c2
   | Lassign(id1, a1), Lassign(id2, a2) ->
       Ident.same id1 id2 && same a1 a2
-  | Lsend(k1, a1, b1, cl1, _), Lsend(k2, a2, b2, cl2, _) ->
+  | Lsend(k1, a1, b1, cl1), Lsend(k2, a2, b2, cl2) ->
       k1 = k2 && same a1 a2 && same b1 b2 && samelist same cl1 cl2
   | Levent(a1, ev1), Levent(a2, ev2) ->
       same a1 a2 && ev1.lev_loc = ev2.lev_loc
@@ -242,7 +242,7 @@ let name_lambda_list args fn =
 let rec iter f = function
     Lvar _
   | Lconst _ -> ()
-  | Lapply(fn, args, _) ->
+  | Lapply(fn, args) ->
       f fn; List.iter f args
   | Lfunction(kind, params, body) ->
       f body
@@ -277,7 +277,7 @@ let rec iter f = function
       f e1; f e2; f e3
   | Lassign(id, e) ->
       f e
-  | Lsend (k, met, obj, args, _) ->
+  | Lsend (k, met, obj, args) ->
       List.iter f (met::obj::args)
   | Levent (lam, evt) ->
       f lam
@@ -320,7 +320,7 @@ let free_variables l =
   free_ids (function Lvar id -> [id] | _ -> []) l
 
 let free_methods l =
-  free_ids (function Lsend(Self, Lvar meth, obj, _, _) -> [meth] | _ -> []) l
+  free_ids (function Lsend(Self, Lvar meth, obj, _) -> [meth] | _ -> []) l
 
 (* Check if an action has a "when" guard *)
 let raise_count = ref 0
@@ -376,7 +376,7 @@ let subst_lambda s lam =
     Lvar id as l ->
       begin try Ident.find_same id s with Not_found -> l end
   | Lconst sc as l -> l
-  | Lapply(fn, args, loc) -> Lapply(subst fn, List.map subst args, loc)
+  | Lapply(fn, args) -> Lapply(subst fn, List.map subst args)
   | Lfunction(kind, params, body) -> Lfunction(kind, params, subst body)
   | Llet(str, id, arg, body) -> Llet(str, id, subst arg, subst body)
   | Lletrec(decl, body) -> Lletrec(List.map subst_decl decl, subst body)
@@ -398,8 +398,8 @@ let subst_lambda s lam =
   | Lwhile(e1, e2) -> Lwhile(subst e1, subst e2)
   | Lfor(v, e1, e2, dir, e3) -> Lfor(v, subst e1, subst e2, dir, subst e3)
   | Lassign(id, e) -> Lassign(id, subst e)
-  | Lsend (k, met, obj, args, loc) ->
-      Lsend (k, subst met, subst obj, List.map subst args, loc)
+  | Lsend (k, met, obj, args) ->
+      Lsend (k, subst met, subst obj, List.map subst args)
   | Levent (lam, evt) -> Levent (subst lam, evt)
   | Lifused (v, e) -> Lifused (v, subst e)
   and subst_decl (id, exp) = (id, subst exp)

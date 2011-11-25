@@ -498,7 +498,7 @@ let rec close fenv cenv = function
 
     (* We convert [f a] to [let a' = a in fun b c -> f a' b c] 
        when fun_arity > nargs *)
-  | Lapply(funct, args, loc) ->
+  | Lapply(funct, args) ->
       let nargs = List.length args in
       begin match (close fenv cenv funct, close_list fenv cenv args) with
         ((ufunct, Value_closure(fundesc, approx_res)),
@@ -530,7 +530,7 @@ let rec close fenv cenv = function
 	in
 	let (new_fun, approx) = close fenv cenv
 	  (Lfunction(
-	    Curried, final_args, Lapply(funct, internal_args, loc)))
+	    Curried, final_args, Lapply(funct, internal_args)))
 	in
 	let new_fun = iter first_args new_fun in
 	(new_fun, approx)
@@ -544,7 +544,7 @@ let rec close fenv cenv = function
       | ((ufunct, _), uargs) ->
           (Ugeneric_apply(ufunct, uargs, Debuginfo.none), Value_unknown)
       end
-  | Lsend(kind, met, obj, args, _) ->
+  | Lsend(kind, met, obj, args) ->
       let (umet, _) = close fenv cenv met in
       let (uobj, _) = close fenv cenv obj in
       (Usend(kind, umet, uobj, close_list fenv cenv args, Debuginfo.none),
