@@ -17,7 +17,7 @@
 include config/Makefile
 include stdlib/StdlibModules
 
-CAMLC=boot/ocamlrun boot/ocamlc -nostdlib -I boot -annot
+CAMLC=boot/ocamlrun boot/ocamlc -nostdlib -I boot -g -annot
 CAMLOPT=boot/ocamlrun ./ocamlopt -nostdlib -I stdlib -I otherlibs/dynlink
 COMPFLAGS=-strict-sequence -warn-error A $(INCLUDES)
 LINKFLAGS=
@@ -71,7 +71,7 @@ BYTECOMP=bytecomp/meta.cmo bytecomp/instruct.cmo bytecomp/bytegen.cmo \
 ASMCOMP=asmcomp/arch.cmo asmcomp/debuginfo.cmo \
   asmcomp/cmm.cmo asmcomp/printcmm.cmo \
   asmcomp/reg.cmo asmcomp/mach.cmo asmcomp/proc.cmo \
-  asmcomp/clambda.cmo asmcomp/compilenv.cmo \
+  asmcomp/clambda.cmo asmcomp/printclambda.cmo asmcomp/compilenv.cmo \
   asmcomp/closure.cmo asmcomp/cmmgen.cmo \
   asmcomp/printmach.cmo asmcomp/selectgen.cmo asmcomp/selection.cmo \
   asmcomp/comballoc.cmo asmcomp/liveness.cmo \

@@ -194,10 +194,10 @@ odoc_str.cmx: ../typing/types.cmx ../typing/printtyp.cmx odoc_value.cmx \
     ../parsing/asttypes.cmi odoc_str.cmi
 odoc_test.cmo: odoc_info.cmi odoc_gen.cmi odoc_args.cmi
 odoc_test.cmx: odoc_info.cmx odoc_gen.cmx odoc_args.cmx
-odoc_texi.cmo: odoc_to_text.cmo odoc_messages.cmo odoc_info.cmi \
-    ../parsing/asttypes.cmi
-odoc_texi.cmx: odoc_to_text.cmx odoc_messages.cmx odoc_info.cmx \
-    ../parsing/asttypes.cmi
+odoc_texi.cmo: ../typing/types.cmi odoc_to_text.cmo odoc_messages.cmo \
+    odoc_info.cmi ../parsing/asttypes.cmi
+odoc_texi.cmx: ../typing/types.cmx odoc_to_text.cmx odoc_messages.cmx \
+    odoc_info.cmx ../parsing/asttypes.cmi
 odoc_text.cmo: odoc_types.cmi odoc_text_parser.cmi odoc_text_lexer.cmo \
     odoc_text.cmi
 odoc_text.cmx: odoc_types.cmx odoc_text_parser.cmx odoc_text_lexer.cmx \
@@ -218,8 +218,6 @@ odoc_value.cmo: ../typing/types.cmi ../typing/printtyp.cmi odoc_types.cmi \
     odoc_parameter.cmo odoc_name.cmi
 odoc_value.cmx: ../typing/types.cmx ../typing/printtyp.cmx odoc_types.cmx \
     odoc_parameter.cmx odoc_name.cmx
-t.cmo:
-t.cmx:
 odoc_analyse.cmi: odoc_module.cmo odoc_global.cmi
 odoc_args.cmi: odoc_gen.cmi
 odoc_ast.cmi: ../typing/types.cmi ../typing/typedtree.cmi ../typing/path.cmi \

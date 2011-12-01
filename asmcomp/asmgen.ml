@@ -94,6 +94,10 @@ let compile_genfuns ppf f =
        | _ -> ())
     (Cmmgen.generic_functions true [Compilenv.current_unit_infos ()])
 
+let print_if ppf flag printer arg =
+  if !flag then fprintf ppf "%a@." printer arg;
+  arg
+
 let compile_implementation ?toplevel prefixname ppf (size, lam) =
   let asmfile =
     if !keep_asm_file
@@ -104,6 +108,7 @@ let compile_implementation ?toplevel prefixname ppf (size, lam) =
     Emitaux.output_channel := oc;
     Emit.begin_assembly();
     Closure.intro size lam
+    ++ print_if ppf Clflags.dump_clambda Printclambda.clambda 
     ++ Cmmgen.compunit size
     ++ List.iter (compile_phrase ppf) ++ (fun () -> ());
     (match toplevel with None -> () | Some f -> compile_genfuns ppf f);

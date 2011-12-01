@@ -82,6 +82,7 @@ let rec combine i allocstate =
       let newhandler = combine_restart handler in
       let newnext = combine_restart i.next in
       (instr_cons (Itrywith(newbody, newhandler)) i.arg i.res newnext, sz)
+(*  | Ievent -> combine i.next allocstate *)
 
 and combine_restart i =
   let (newi, _) = combine i No_alloc in newi

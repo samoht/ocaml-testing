@@ -332,8 +332,15 @@ let tailrec_entry_point = ref 0
 
 let float_constants = ref ([] : (int * string) list)
 
+let last_line = ref (-1)
+
 let emit_instr fallthrough i =
-    match i.desc with
+  if i.dbg != Debuginfo.none && !last_line <> i.dbg.Debuginfo.dinfo_line
+  then begin
+    last_line := i.dbg.Debuginfo.dinfo_line;
+    `	.line {emit_int !last_line}\n`
+  end;
+  match i.desc with
       Lend -> ()
     | Lop(Imove | Ispill | Ireload) ->
         let src = i.arg.(0) and dst = i.res.(0) in

@@ -147,18 +147,21 @@ let emit_frames a =
       lbl in
   let emit_frame fd =
     a.efa_label fd.fd_lbl;
-    a.efa_16 (if fd.fd_debuginfo == Debuginfo.none
-              then fd.fd_frame_size
-              else fd.fd_frame_size + 1);
+    a.efa_16 (if Debuginfo.needs_frame fd.fd_debuginfo
+              then fd.fd_frame_size + 1
+              else fd.fd_frame_size);
     a.efa_16 (List.length fd.fd_live_offset);
     List.iter a.efa_16 fd.fd_live_offset;
     a.efa_align Arch.size_addr;
-    if fd.fd_debuginfo != Debuginfo.none then begin
+    if Debuginfo.needs_frame fd.fd_debuginfo then begin
       let d = fd.fd_debuginfo in
       let line = min 0xFFFFF d.dinfo_line
       and char_start = min 0xFF d.dinfo_char_start
       and char_end = min 0x3FF d.dinfo_char_end
-      and kind = match d.dinfo_kind with Dinfo_call -> 0 | Dinfo_raise -> 1 in
+      and kind = match d.dinfo_kind with
+        | Dinfo_call  -> 0
+        | Dinfo_raise -> 1
+        | Dinfo_event -> failwith "emit_frame" in
       let info =
         Int64.add (Int64.shift_left (Int64.of_int line) 44) (
         Int64.add (Int64.shift_left (Int64.of_int char_start) 36) (

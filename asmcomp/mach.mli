@@ -74,6 +74,7 @@ and instruction_desc =
   | Iexit of int
   | Itrywith of instruction * instruction
   | Iraise
+(*  | Ievent *)
 
 type fundecl =
   { fun_name: string;

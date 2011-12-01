@@ -44,8 +44,8 @@ class virtual selector_generic : object
        Default implementation is like Reg.createv.
        Can be overridden if float values are stored as pairs of
        integer registers. *)
-  method insert_op :
-    Mach.operation -> Reg.t array -> Reg.t array -> Reg.t array
+(*  method insert_op :
+    Mach.operation -> Reg.t array -> Reg.t array -> Reg.t array *)
     (* Can be overridden to deal with 2-address instructions
        or instructions with hardwired input/output registers *)
   method insert_op_debug :
@@ -67,13 +67,13 @@ class virtual selector_generic : object
      declared "private" in the current implementation because they
      are not always applied to "self", but ideally they should be private. *)
   method extract : Mach.instruction
-  method insert : Mach.instruction_desc -> Reg.t array -> Reg.t array -> unit
+(*  method insert : Mach.instruction_desc -> Reg.t array -> Reg.t array -> unit*)
   method insert_debug : Mach.instruction_desc -> Debuginfo.t ->
                                         Reg.t array -> Reg.t array -> unit
-  method insert_move : Reg.t -> Reg.t -> unit
-  method insert_move_args : Reg.t array -> Reg.t array -> int -> unit
-  method insert_move_results : Reg.t array -> Reg.t array -> int -> unit
-  method insert_moves : Reg.t array -> Reg.t array -> unit
+  method insert_move : Debuginfo.t -> Reg.t -> Reg.t -> unit
+  method insert_move_args : Debuginfo.t -> Reg.t array -> Reg.t array -> int -> unit
+  method insert_move_results : Debuginfo.t -> Reg.t array -> Reg.t array -> int -> unit
+  method insert_moves : Debuginfo.t -> Reg.t array -> Reg.t array -> unit
   method emit_expr :
     (Ident.t, Reg.t array) Tbl.t -> Cmm.expression -> Reg.t array option
   method emit_tail : (Ident.t, Reg.t array) Tbl.t -> Cmm.expression -> unit

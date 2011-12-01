@@ -13,7 +13,10 @@
 open Lexing
 open Location
 
-type kind = Dinfo_call | Dinfo_raise
+type kind =
+  | Dinfo_call
+  | Dinfo_raise
+  | Dinfo_event
 
 type t = {
   dinfo_kind: kind;
@@ -37,6 +40,15 @@ let to_string d =
   else Printf.sprintf "{%s:%d,%d-%d}"
            d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end
 
+let check d =
+  let env =
+    try ignore (Sys.getenv "DBGTEST"); true
+    with _ -> false in
+  if env && d = none && d != none then begin
+    Printexc.print_backtrace stderr;
+    assert false
+  end
+
 let from_location kind loc =
   if loc.loc_ghost then none else
   { dinfo_kind = kind;
@@ -48,5 +60,15 @@ let from_location kind loc =
       then loc.loc_end.pos_cnum - loc.loc_start.pos_bol
       else loc.loc_start.pos_cnum - loc.loc_start.pos_bol }
 
-let from_call ev = from_location Dinfo_call ev.Lambda.lev_loc
-let from_raise ev = from_location Dinfo_raise ev.Lambda.lev_loc
+let from kind ev =
+  from_location kind ev.Lambda.lev_loc
+
+let from_call  = from Dinfo_call 
+let from_raise = from Dinfo_raise
+let from_event = from Dinfo_event
+
+let needs_frame ev =
+  ev != none &&
+  match ev.dinfo_kind with
+    | Dinfo_event -> false
+    | _           -> true

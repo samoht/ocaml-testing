@@ -20,17 +20,16 @@ open Lambda
 
 type function_label = string
 
-type ulambda =
+type ulambda_desc =
     Uvar of Ident.t
   | Uconst of structured_constant * string option
-  | Udirect_apply of function_label * ulambda list * Debuginfo.t
-  | Ugeneric_apply of ulambda * ulambda list * Debuginfo.t
-  | Uclosure of (function_label * int * Ident.t list * ulambda) list
-              * ulambda list
+  | Udirect_apply of function_label * ulambda list
+  | Ugeneric_apply of ulambda * ulambda list
+  | Uclosure of ufun list * ulambda list
   | Uoffset of ulambda * int
   | Ulet of Ident.t * ulambda * ulambda
   | Uletrec of (Ident.t * ulambda) list * ulambda
-  | Uprim of primitive * ulambda list * Debuginfo.t
+  | Uprim of primitive * ulambda list
   | Uswitch of ulambda * ulambda_switch
   | Ustaticfail of int * ulambda list
   | Ucatch of int * Ident.t list * ulambda * ulambda
@@ -40,13 +39,31 @@ type ulambda =
   | Uwhile of ulambda * ulambda
   | Ufor of Ident.t * ulambda * ulambda * direction_flag * ulambda
   | Uassign of Ident.t * ulambda
-  | Usend of meth_kind * ulambda * ulambda * ulambda list * Debuginfo.t
+  | Usend of meth_kind * ulambda * ulambda * ulambda list
+
+and ufun = {
+  uf_dbg    : Debuginfo.t;
+  uf_label  : function_label;
+  uf_arity  : int;
+  uf_params : Ident.t list;
+  uf_body   : ulambda;
+}
+
+and ulambda = {
+  ul_dbg  : Debuginfo.t;
+  ul_desc : ulambda_desc;
+}
 
 and ulambda_switch =
   { us_index_consts: int array;
     us_actions_consts : ulambda array;
     us_index_blocks: int array;
     us_actions_blocks: ulambda array}
+
+let mkulambda_dbg ul_dbg ul_desc =
+  { ul_dbg; ul_desc }
+
+let mkulambda = mkulambda_dbg Debuginfo.none
 
 (* Description of known functions *)
 

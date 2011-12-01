@@ -10,7 +10,10 @@
 (*                                                                     *)
 (***********************************************************************)
 
-type kind = Dinfo_call | Dinfo_raise
+type kind =
+  | Dinfo_call
+  | Dinfo_raise
+  | Dinfo_event
 
 type t = {
   dinfo_kind: kind;
@@ -23,8 +26,12 @@ type t = {
 val none: t
 
 val to_string: t -> string
+val check: t -> unit
 
 val from_location: kind -> Location.t -> t
 
-val from_call: Lambda.lambda_event -> t
+val from_call : Lambda.lambda_event -> t
 val from_raise: Lambda.lambda_event -> t
+val from_event: Lambda.lambda_event -> t
+
+val needs_frame: t -> bool

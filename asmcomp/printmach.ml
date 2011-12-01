@@ -181,6 +181,7 @@ let rec instr ppf i =
              instr body instr handler
   | Iraise ->
       fprintf ppf "raise %a" reg i.arg.(0)
+(*  | Ievent -> fprintf ppf "event" *)
   end;
   if i.dbg != Debuginfo.none then
     fprintf ppf " %s" (Debuginfo.to_string i.dbg);

@@ -33,8 +33,8 @@ let rec split_list n l =
 let rec build_closure_env env_param pos = function
     [] -> Tbl.empty
   | id :: rem ->
-      Tbl.add id (Uprim(Pfield pos, [Uvar env_param], Debuginfo.none))
-              (build_closure_env env_param (pos+1) rem)
+    let ul = mkulambda (Uprim(Pfield pos, [mkulambda (Uvar env_param)])) in
+    Tbl.add id ul (build_closure_env env_param (pos+1) rem)
 
 (* Auxiliary for accessing globals.  We change the name of the global
    to the name of the corresponding asm symbol.  This is done here
@@ -42,23 +42,24 @@ let rec build_closure_env env_param pos = function
    contain the right names if the -for-pack option is active. *)
 
 let getglobal id =
-  Uprim(Pgetglobal (Ident.create_persistent (Compilenv.symbol_for_global id)),
-        [], Debuginfo.none)
+  let symb = Ident.create_persistent (Compilenv.symbol_for_global id) in
+  mkulambda (Uprim(Pgetglobal symb, []))
+
 
 (* Check if a variable occurs in a [clambda] term. *)
 
 let occurs_var var u =
-  let rec occurs = function
+  let rec occurs ul = match ul.ul_desc with
       Uvar v -> v = var
     | Uconst (cst,_) -> false
-    | Udirect_apply(lbl, args, _) -> List.exists occurs args
-    | Ugeneric_apply(funct, args, _) -> occurs funct || List.exists occurs args
+    | Udirect_apply(lbl, args) -> List.exists occurs args
+    | Ugeneric_apply(funct, args) -> occurs funct || List.exists occurs args
     | Uclosure(fundecls, clos) -> List.exists occurs clos
     | Uoffset(u, ofs) -> occurs u
     | Ulet(id, def, body) -> occurs def || occurs body
     | Uletrec(decls, body) ->
         List.exists (fun (id, u) -> occurs u) decls || occurs body
-    | Uprim(p, args, _) -> List.exists occurs args
+    | Uprim(p, args) -> List.exists occurs args
     | Uswitch(arg, s) ->
         occurs arg ||
         occurs_array s.us_actions_consts || occurs_array s.us_actions_blocks
@@ -71,7 +72,7 @@ let occurs_var var u =
     | Uwhile(cond, body) -> occurs cond || occurs body
     | Ufor(id, lo, hi, dir, body) -> occurs lo || occurs hi || occurs body
     | Uassign(id, u) -> id = var || occurs u
-    | Usend(_, met, obj, args, _) ->
+    | Usend(_, met, obj, args) ->
         occurs met || occurs obj || List.exists occurs args
   and occurs_array a =
     try
@@ -118,7 +119,7 @@ let lambda_smaller lam threshold =
   let size = ref 0 in
   let rec lambda_size lam =
     if !size > threshold then raise Exit;
-    match lam with
+    match lam.ul_desc with
       Uvar v -> ()
     | Uconst(
 	(Const_base(Const_int _ | Const_char _ | Const_float _ |
@@ -128,9 +129,9 @@ let lambda_smaller lam threshold =
     | Uconst (_, Some _) -> incr size
     | Uconst _ ->
         raise Exit (* avoid duplication of structured constants *)
-    | Udirect_apply(fn, args, _) ->
+    | Udirect_apply(fn, args) ->
         size := !size + 4; lambda_list_size args
-    | Ugeneric_apply(fn, args, _) ->
+    | Ugeneric_apply(fn, args) ->
         size := !size + 6; lambda_size fn; lambda_list_size args
     | Uclosure(defs, vars) ->
         raise Exit (* inlining would duplicate function definitions *)
@@ -140,7 +141,7 @@ let lambda_smaller lam threshold =
         lambda_size lam; lambda_size body
     | Uletrec(bindings, body) ->
         raise Exit (* usually too large *)
-    | Uprim(prim, args, _) ->
+    | Uprim(prim, args) ->
         size := !size + prim_size prim args;
         lambda_list_size args
     | Uswitch(lam, cases) ->
@@ -165,7 +166,7 @@ let lambda_smaller lam threshold =
         size := !size + 4; lambda_size low; lambda_size high; lambda_size body
     | Uassign(id, lam) ->
         incr size;  lambda_size lam
-    | Usend(_, met, obj, args, _) ->
+    | Usend(_, met, obj, args) ->
         size := !size + 8;
         lambda_size met; lambda_size obj; lambda_list_size args
   and lambda_list_size l = List.iter lambda_size l
@@ -178,43 +179,50 @@ let lambda_smaller lam threshold =
 (* Check if a clambda term is ``pure'',
    that is without side-effects *and* not containing function definitions *)
 
-let rec is_pure_clambda = function
+let rec is_pure_clambda ul = match ul.ul_desc with
     Uvar v -> true
   | Uconst _ -> true
   | Uprim((Psetglobal _ | Psetfield _ | Psetfloatfield _ | Pduprecord _ |
            Pccall _ | Praise | Poffsetref _ | Pstringsetu | Pstringsets |
-           Parraysetu _ | Parraysets _ | Pbigarrayset _), _, _) -> false
-  | Uprim(p, args, _) -> List.for_all is_pure_clambda args
+           Parraysetu _ | Parraysets _ | Pbigarrayset _), _) -> false
+  | Uprim(p, args) -> List.for_all is_pure_clambda args
   | _ -> false
 
 (* Simplify primitive operations on integers *)
 
-let make_const_int n = (Uconst(Const_base(Const_int n), None), Value_integer n)
-let make_const_ptr n = (Uconst(Const_pointer n, None), Value_constptr n)
-let make_const_bool b = make_const_ptr(if b then 1 else 0)
+let make_const_int dbg n =
+  mkulambda_dbg dbg (Uconst(Const_base(Const_int n), None)),
+  Value_integer n
+
+let make_const_ptr dbg n =
+  mkulambda_dbg dbg (Uconst(Const_pointer n, None)),
+  Value_constptr n
+
+let make_const_bool dbg b =
+  make_const_ptr dbg (if b then 1 else 0)
 
 let simplif_prim_pure p (args, approxs) dbg =
   match approxs with
     [Value_integer x] ->
       begin match p with
-        Pidentity -> make_const_int x
-      | Pnegint -> make_const_int (-x)
-      | Poffsetint y -> make_const_int (x + y)
-      | _ -> (Uprim(p, args, dbg), Value_unknown)
+      | Pidentity    -> make_const_int dbg x
+      | Pnegint      -> make_const_int dbg (-x)
+      | Poffsetint y -> make_const_int dbg (x + y)
+      | _            -> mkulambda_dbg dbg (Uprim(p, args)), Value_unknown
       end
   | [Value_integer x; Value_integer y] ->
       begin match p with
-        Paddint -> make_const_int(x + y)
-      | Psubint -> make_const_int(x - y)
-      | Pmulint -> make_const_int(x * y)
-      | Pdivint when y <> 0 -> make_const_int(x / y)
-      | Pmodint when y <> 0 -> make_const_int(x mod y)
-      | Pandint -> make_const_int(x land y)
-      | Porint -> make_const_int(x lor y)
-      | Pxorint -> make_const_int(x lxor y)
-      | Plslint -> make_const_int(x lsl y)
-      | Plsrint -> make_const_int(x lsr y)
-      | Pasrint -> make_const_int(x asr y)
+      | Paddint -> make_const_int dbg (x + y)
+      | Psubint -> make_const_int dbg (x - y)
+      | Pmulint -> make_const_int dbg (x * y)
+      | Pdivint when y <> 0 -> make_const_int dbg (x / y)
+      | Pmodint when y <> 0 -> make_const_int dbg (x mod y)
+      | Pandint -> make_const_int dbg (x land y)
+      | Porint  -> make_const_int dbg (x lor y)
+      | Pxorint -> make_const_int dbg (x lxor y)
+      | Plslint -> make_const_int dbg (x lsl y)
+      | Plsrint -> make_const_int dbg (x lsr y)
+      | Pasrint -> make_const_int dbg (x asr y)
       | Pintcomp cmp ->
           let result = match cmp with
               Ceq -> x = y
@@ -223,29 +231,29 @@ let simplif_prim_pure p (args, approxs) dbg =
             | Cgt -> x > y
             | Cle -> x <= y
             | Cge -> x >= y in
-          make_const_bool result
-      | _ -> (Uprim(p, args, dbg), Value_unknown)
+          make_const_bool dbg result
+      | _ -> mkulambda_dbg dbg (Uprim(p, args)), Value_unknown
       end
   | [Value_constptr x] ->
       begin match p with
-        Pidentity -> make_const_ptr x
-      | Pnot -> make_const_bool(x = 0)
-      | Pisint -> make_const_bool true
-      | _ -> (Uprim(p, args, dbg), Value_unknown)
+        Pidentity -> make_const_ptr dbg x
+      | Pnot      -> make_const_bool dbg (x = 0)
+      | Pisint    -> make_const_bool dbg true
+      | _         -> mkulambda_dbg dbg (Uprim(p, args)), Value_unknown
       end
   | [Value_constptr x; Value_constptr y] ->
       begin match p with
-        Psequand -> make_const_bool(x <> 0 && y <> 0)
-      | Psequor  -> make_const_bool(x <> 0 || y <> 0)
-      | _ -> (Uprim(p, args, dbg), Value_unknown)
+        Psequand -> make_const_bool dbg (x <> 0 && y <> 0)
+      | Psequor  -> make_const_bool dbg (x <> 0 || y <> 0)
+      | _ -> mkulambda_dbg dbg (Uprim(p, args)), Value_unknown
       end
   | _ ->
-      (Uprim(p, args, dbg), Value_unknown)
+      mkulambda_dbg dbg (Uprim(p, args)), Value_unknown
 
 let simplif_prim p (args, approxs as args_approxs) dbg =
   if List.for_all is_pure_clambda args
   then simplif_prim_pure p args_approxs dbg
-  else (Uprim(p, args, dbg), Value_unknown)
+  else (mkulambda_dbg dbg (Uprim(p, args)), Value_unknown)
 
 (* Substitute variables in a [ulambda] term (a body of an inlined function)
    and perform some more simplifications on integer primitives.
@@ -256,21 +264,25 @@ let simplif_prim p (args, approxs as args_approxs) dbg =
    during inline expansion, and also for the translation of let rec
    over functions. *)
 
-let approx_ulam = function
+let approx_ulam ulam = match ulam.ul_desc with
     Uconst(Const_base(Const_int n),_) -> Value_integer n
   | Uconst(Const_base(Const_char c),_) -> Value_integer(Char.code c)
   | Uconst(Const_pointer n,_) -> Value_constptr n
   | _ -> Value_unknown
 
 let rec substitute sb ulam =
-  match ulam with
+  let mk = mkulambda_dbg ulam.ul_dbg in
+  match ulam.ul_desc with
     Uvar v ->
-      begin try Tbl.find v sb with Not_found -> ulam end
+      begin
+        try { (Tbl.find v sb) with ul_dbg =  ulam.ul_dbg }
+        with Not_found -> ulam
+      end
   | Uconst _ -> ulam
-  | Udirect_apply(lbl, args, dbg) ->
-      Udirect_apply(lbl, List.map (substitute sb) args, dbg)
-  | Ugeneric_apply(fn, args, dbg) ->
-      Ugeneric_apply(substitute sb fn, List.map (substitute sb) args, dbg)
+  | Udirect_apply(lbl, args) ->
+      mk (Udirect_apply(lbl, List.map (substitute sb) args))
+  | Ugeneric_apply(fn, args) ->
+      mk (Ugeneric_apply(substitute sb fn, List.map (substitute sb) args))
   | Uclosure(defs, env) ->
       (* Question: should we rename function labels as well?  Otherwise,
          there is a risk that function labels are not globally unique.
@@ -280,66 +292,67 @@ let rec substitute sb ulam =
          - When we substitute offsets for idents bound by let rec
            in [close], case [Lletrec], we discard the original
            let rec body and use only the substituted term. *)
-      Uclosure(defs, List.map (substitute sb) env)
-  | Uoffset(u, ofs) -> Uoffset(substitute sb u, ofs)
+      mk (Uclosure(defs, List.map (substitute sb) env))
+  | Uoffset(u, ofs) -> mk (Uoffset(substitute sb u, ofs))
   | Ulet(id, u1, u2) ->
       let id' = Ident.rename id in
-      Ulet(id', substitute sb u1, substitute (Tbl.add id (Uvar id') sb) u2)
+      mk (Ulet(id', substitute sb u1, substitute (Tbl.add id (mk (Uvar id')) sb) u2))
   | Uletrec(bindings, body) ->
       let bindings1 =
         List.map (fun (id, rhs) -> (id, Ident.rename id, rhs)) bindings in
       let sb' =
         List.fold_right
-          (fun (id, id', _) s -> Tbl.add id (Uvar id') s)
+          (fun (id, id', _) s -> Tbl.add id (mk (Uvar id')) s)
           bindings1 sb in
-      Uletrec(
+      mk (Uletrec(
         List.map (fun (id, id', rhs) -> (id', substitute sb' rhs)) bindings1,
-        substitute sb' body)
-  | Uprim(p, args, dbg) ->
+        substitute sb' body))
+  | Uprim(p, args) ->
       let sargs = List.map (substitute sb) args in
-      let (res, _) = simplif_prim p (sargs, List.map approx_ulam sargs) dbg in
+      let (res, _) = simplif_prim p (sargs, List.map approx_ulam sargs) ulam.ul_dbg in (* XXX *)
       res
   | Uswitch(arg, sw) ->
-      Uswitch(substitute sb arg,
+      mk (Uswitch(substitute sb arg,
               { sw with
                 us_actions_consts =
                   Array.map (substitute sb) sw.us_actions_consts;
                 us_actions_blocks =
                   Array.map (substitute sb) sw.us_actions_blocks;
-               })
+               }))
   | Ustaticfail (nfail, args) ->
-      Ustaticfail (nfail, List.map (substitute sb) args)
+      mk (Ustaticfail (nfail, List.map (substitute sb) args))
   | Ucatch(nfail, ids, u1, u2) ->
-      Ucatch(nfail, ids, substitute sb u1, substitute sb u2)
+      mk (Ucatch(nfail, ids, substitute sb u1, substitute sb u2))
   | Utrywith(u1, id, u2) ->
       let id' = Ident.rename id in
-      Utrywith(substitute sb u1, id', substitute (Tbl.add id (Uvar id') sb) u2)
+      mk (Utrywith(substitute sb u1, id', substitute (Tbl.add id (mk (Uvar id')) sb) u2))
   | Uifthenelse(u1, u2, u3) ->
-      begin match substitute sb u1 with
+      let su1 = substitute sb u1 in
+      begin match su1.ul_desc with
         Uconst(Const_pointer n, _) ->
           if n <> 0 then substitute sb u2 else substitute sb u3
-      | su1 ->
-          Uifthenelse(su1, substitute sb u2, substitute sb u3)
+      | _ ->
+          mk (Uifthenelse(su1, substitute sb u2, substitute sb u3))
       end
-  | Usequence(u1, u2) -> Usequence(substitute sb u1, substitute sb u2)
-  | Uwhile(u1, u2) -> Uwhile(substitute sb u1, substitute sb u2)
+  | Usequence(u1, u2) -> mk (Usequence(substitute sb u1, substitute sb u2))
+  | Uwhile(u1, u2) -> mk (Uwhile(substitute sb u1, substitute sb u2))
   | Ufor(id, u1, u2, dir, u3) ->
       let id' = Ident.rename id in
-      Ufor(id', substitute sb u1, substitute sb u2, dir,
-           substitute (Tbl.add id (Uvar id') sb) u3)
+      mk (Ufor(id', substitute sb u1, substitute sb u2, dir,
+           substitute (Tbl.add id (mk (Uvar id')) sb) u3))
   | Uassign(id, u) ->
       let id' =
         try
-          match Tbl.find id sb with Uvar i -> i | _ -> assert false
+          match Tbl.find id sb with {ul_desc=Uvar i} -> i | _ -> assert false
         with Not_found ->
           id in
-      Uassign(id', substitute sb u)
-  | Usend(k, u1, u2, ul, dbg) ->
-      Usend(k, substitute sb u1, substitute sb u2, List.map (substitute sb) ul, dbg)
+      mk (Uassign(id', substitute sb u))
+  | Usend(k, u1, u2, ul) ->
+      mk (Usend(k, substitute sb u1, substitute sb u2, List.map (substitute sb) ul))
 
 (* Perform an inline expansion *)
 
-let is_simple_argument = function
+let is_simple_argument ulam = match ulam.ul_desc with
     Uvar _ -> true
   | Uconst(Const_base(Const_int _ | Const_char _ | Const_float _ |
                       Const_int32 _ | Const_int64 _ | Const_nativeint _),_) ->
@@ -347,10 +360,10 @@ let is_simple_argument = function
   | Uconst(Const_pointer _, _) -> true
   | _ -> false
 
-let no_effects = function
+let no_effects ulam = match ulam.ul_desc with
     Uclosure _ -> true
   | Uconst(Const_base(Const_string _),_) -> true
-  | u -> is_simple_argument u
+  | _ -> is_simple_argument ulam
 
 let rec bind_params_rec subst params args body =
   match (params, args) with
@@ -360,11 +373,12 @@ let rec bind_params_rec subst params args body =
         bind_params_rec (Tbl.add p1 a1 subst) pl al body
       else begin
         let p1' = Ident.rename p1 in
+        let mk = mkulambda_dbg body.ul_dbg in
         let body' =
-          bind_params_rec (Tbl.add p1 (Uvar p1') subst) pl al body in
-        if occurs_var p1 body then Ulet(p1', a1, body')
+          bind_params_rec (Tbl.add p1 (mk (Uvar p1')) subst) pl al body in
+        if occurs_var p1 body then mk (Ulet(p1', a1, body'))
         else if no_effects a1 then body'
-        else Usequence(a1, body')
+        else mk (Usequence(a1, body'))
       end
   | (_, _) -> assert false
 
@@ -389,11 +403,12 @@ let rec is_pure = function
 (* Generate a direct application *)
 
 let direct_apply fundesc funct ufunct uargs =
+  let mk = mkulambda_dbg ufunct.ul_dbg in
   let app_args =
     if fundesc.fun_closed then uargs else uargs @ [ufunct] in
   let app =
     match fundesc.fun_inline with
-      None -> Udirect_apply(fundesc.fun_label, app_args, Debuginfo.none)
+      None -> mk (Udirect_apply(fundesc.fun_label, app_args))
     | Some(params, body) -> bind_params params app_args body in
   (* If ufunct can contain side-effects or function definitions,
      we must make sure that it is evaluated exactly once.
@@ -402,7 +417,7 @@ let direct_apply fundesc funct ufunct uargs =
      If the function is closed, we force the evaluation of ufunct first. *)
   if not fundesc.fun_closed || is_pure funct
   then app
-  else Usequence(ufunct, app)
+  else mk (Usequence(ufunct, app))
 
 (* Add [Value_integer] or [Value_constptr] info to the approximation
    of an application *)
@@ -417,15 +432,15 @@ let strengthen_approx appl approx =
 
 let check_constant_result lam ulam approx =
   match approx with
-    Value_integer n when is_pure lam -> make_const_int n
-  | Value_constptr n when is_pure lam -> make_const_ptr n
+    Value_integer n when is_pure lam -> make_const_int ulam.ul_dbg n
+  | Value_constptr n when is_pure lam -> make_const_ptr ulam.ul_dbg n
   | _ -> (ulam, approx)
 
 (* Evaluate an expression with known value for its side effects only,
    or discard it if it's pure *)
 
 let sequence_constant_expr lam ulam1 (ulam2, approx2 as res2) =
-  if is_pure lam then res2 else (Usequence(ulam1, ulam2), approx2)
+  if is_pure lam then res2 else (mkulambda (Usequence(ulam1, ulam2)), approx2)
 
 (* Maintain the approximation of the global structure being defined *)
 
@@ -441,26 +456,22 @@ let excessive_function_nesting_depth = 5
 let rec add_debug_info ev u =
   match ev.lev_kind with
   | Lev_after _ ->
-      begin match u with
-      | Udirect_apply(lbl, args, dinfo) ->
-          Udirect_apply(lbl, args, Debuginfo.from_call ev)
-      | Ugeneric_apply(Udirect_apply(lbl, args1, dinfo1),
-                       args2, dinfo2) ->
-          Ugeneric_apply(Udirect_apply(lbl, args1, Debuginfo.from_call ev),
-                         args2, Debuginfo.from_call ev)
-      | Ugeneric_apply(fn, args, dinfo) ->
-          Ugeneric_apply(fn, args, Debuginfo.from_call ev)
-      | Uprim(Praise, args, dinfo) ->
-          Uprim(Praise, args, Debuginfo.from_call ev)
-      | Uprim(p, args, dinfo) ->
-          Uprim(p, args, Debuginfo.from_call ev)
-      | Usend(kind, u1, u2, args, dinfo) ->
-          Usend(kind, u1, u2, args, Debuginfo.from_call ev)
-      | Usequence(u1, u2) ->
-          Usequence(u1, add_debug_info ev u2)
-      | _ -> u
+      begin match u.ul_desc with
+      | Udirect_apply _
+      | Ugeneric_apply _
+      | Uprim _
+      | Usend _ -> { u with ul_dbg = Debuginfo.from_call ev }
+      | Usequence(u1,u2) ->
+        { u with ul_desc = Usequence(u1, add_debug_info ev u2) }
+      | _ -> { u with ul_dbg = Debuginfo.from_event ev }
       end
-  | _ -> u
+  | Lev_before ->
+      begin match u.ul_desc with
+      | Usequence(u1,u2) ->
+        { u with ul_desc = Usequence(add_debug_info ev u1, u2) }
+      | _ -> { u with ul_dbg = (Debuginfo.from_event ev) }
+      end
+  | _ -> { u with ul_dbg = (Debuginfo.from_event ev) }
 
 (* Uncurry an expression and explicitate closures.
    Also return the approximation of the expression.
@@ -473,25 +484,27 @@ let close_approx_var fenv cenv id =
   let approx = try Tbl.find id fenv with Not_found -> Value_unknown in
   match approx with
     Value_integer n ->
-      make_const_int n
+      make_const_int Debuginfo.none n
   | Value_constptr n ->
-      make_const_ptr n
+      make_const_ptr Debuginfo.none n
   | approx ->
-      let subst = try Tbl.find id cenv with Not_found -> Uvar id in
+      let subst = try Tbl.find id cenv with Not_found -> mkulambda (Uvar id) in
       (subst, approx)
 
 let close_var fenv cenv id =
   let (ulam, app) = close_approx_var fenv cenv id in ulam
 
-let rec close fenv cenv = function
+let rec close fenv cenv lam =
+  let mk = mkulambda in
+  match lam with
     Lvar id ->
       close_approx_var fenv cenv id
   | Lconst cst ->
       begin match cst with
-        Const_base(Const_int n) -> (Uconst (cst,None), Value_integer n)
-      | Const_base(Const_char c) -> (Uconst (cst,None), Value_integer(Char.code c))
-      | Const_pointer n -> (Uconst (cst, None), Value_constptr n)
-      | _ -> (Uconst (cst, Some (Compilenv.new_structured_constant cst true)), Value_unknown)
+        Const_base(Const_int n) -> (mk (Uconst (cst,None)), Value_integer n)
+      | Const_base(Const_char c) -> (mk (Uconst (cst,None)), Value_integer(Char.code c))
+      | Const_pointer n -> (mk (Uconst (cst, None)), Value_constptr n)
+      | _ -> (mk (Uconst (cst, Some (Compilenv.new_structured_constant cst true))), Value_unknown)
       end
   | Lfunction(kind, params, body) as funct ->
       close_one_function fenv cenv (Ident.create "fun") funct
@@ -502,10 +515,11 @@ let rec close fenv cenv = function
       let nargs = List.length args in
       begin match (close fenv cenv funct, close_list fenv cenv args) with
         ((ufunct, Value_closure(fundesc, approx_res)),
-         [Uprim(Pmakeblock(_, _), uargs, _)])
+         [{ul_desc=Uprim(Pmakeblock(_, _), uargs)}])
         when List.length uargs = - fundesc.fun_arity ->
           let app = direct_apply fundesc funct ufunct uargs in
           (app, strengthen_approx app approx_res)
+
       | ((ufunct, Value_closure(fundesc, approx_res)), uargs)
         when nargs = fundesc.fun_arity ->
           let app = direct_apply fundesc funct ufunct uargs in
@@ -521,8 +535,7 @@ let rec close fenv cenv = function
 	  match args with
 	      [] -> body
 	    | (arg1, arg2) :: args ->
-	      iter args
-		(Ulet ( arg1, arg2, body))
+	      iter args (mk (Ulet ( arg1, arg2, body)))
 	in
 	let internal_args =
 	  (List.map (fun (arg1, arg2) -> Lvar arg1) first_args)
@@ -538,29 +551,26 @@ let rec close fenv cenv = function
       | ((ufunct, Value_closure(fundesc, approx_res)), uargs)
         when fundesc.fun_arity > 0 && nargs > fundesc.fun_arity ->
           let (first_args, rem_args) = split_list fundesc.fun_arity uargs in
-          (Ugeneric_apply(direct_apply fundesc funct ufunct first_args,
-                          rem_args, Debuginfo.none),
-           Value_unknown)
-      | ((ufunct, _), uargs) ->
-          (Ugeneric_apply(ufunct, uargs, Debuginfo.none), Value_unknown)
+          mk (Ugeneric_apply(direct_apply fundesc funct ufunct first_args, rem_args)),
+          Value_unknown
+      | ((ufunct, _), uargs) -> mk (Ugeneric_apply(ufunct, uargs)), Value_unknown
       end
   | Lsend(kind, met, obj, args) ->
       let (umet, _) = close fenv cenv met in
       let (uobj, _) = close fenv cenv obj in
-      (Usend(kind, umet, uobj, close_list fenv cenv args, Debuginfo.none),
-       Value_unknown)
+      mk (Usend(kind, umet, uobj, close_list fenv cenv args)), Value_unknown
   | Llet(str, id, lam, body) ->
       let (ulam, alam) = close_named fenv cenv id lam in
       begin match (str, alam) with
         (Variable, _) ->
           let (ubody, abody) = close fenv cenv body in
-          (Ulet(id, ulam, ubody), abody)
+          mk (Ulet(id, ulam, ubody)), abody
       | (_, (Value_integer _ | Value_constptr _))
         when str = Alias || is_pure lam ->
           close (Tbl.add id alam fenv) cenv body
       | (_, _) ->
           let (ubody, abody) = close (Tbl.add id alam fenv) cenv body in
-          (Ulet(id, ulam, ubody), abody)
+          mk (Ulet(id, ulam, ubody)), abody
       end
   | Lletrec(defs, body) ->
       if List.for_all
@@ -578,10 +588,9 @@ let rec close fenv cenv = function
         let sb =
           List.fold_right
             (fun (id, pos, approx) sb ->
-              Tbl.add id (Uoffset(Uvar clos_ident, pos)) sb)
+              Tbl.add id (mk (Uoffset(mk (Uvar clos_ident), pos))) sb)
             infos Tbl.empty in
-        (Ulet(clos_ident, clos, substitute sb ubody),
-         approx)
+        mk (Ulet(clos_ident, clos, substitute sb ubody)), approx
       end else begin
         (* General case: recursive definition of values *)
         let rec clos_defs = function
@@ -592,7 +601,7 @@ let rec close fenv cenv = function
             ((id, ulam) :: udefs, Tbl.add id approx fenv_body) in
         let (udefs, fenv_body) = clos_defs defs in
         let (ubody, approx) = close fenv_body cenv body in
-        (Uletrec(udefs, ubody), approx)
+        mk (Uletrec(udefs, ubody)), approx
       end
   | Lprim(Pgetglobal id, []) as lam ->
       check_constant_result lam
@@ -600,27 +609,26 @@ let rec close fenv cenv = function
                             (Compilenv.global_approx id)
   | Lprim(Pmakeblock(tag, mut) as prim, lams) ->
       let (ulams, approxs) = List.split (List.map (close fenv cenv) lams) in
-      (Uprim(prim, ulams, Debuginfo.none),
+      mk (Uprim(prim, ulams)),
        begin match mut with
            Immutable -> Value_tuple(Array.of_list approxs)
          | Mutable -> Value_unknown
-       end)
+       end
   | Lprim(Pfield n, [lam]) ->
       let (ulam, approx) = close fenv cenv lam in
       let fieldapprox =
         match approx with
           Value_tuple a when n < Array.length a -> a.(n)
         | _ -> Value_unknown in
-      check_constant_result lam (Uprim(Pfield n, [ulam], Debuginfo.none)) fieldapprox
+      check_constant_result lam (mk (Uprim(Pfield n, [ulam]))) fieldapprox
   | Lprim(Psetfield(n, _), [Lprim(Pgetglobal id, []); lam]) ->
       let (ulam, approx) = close fenv cenv lam in
       (!global_approx).(n) <- approx;
-      (Uprim(Psetfield(n, false), [getglobal id; ulam], Debuginfo.none),
-       Value_unknown)
+      mk (Uprim(Psetfield(n, false), [getglobal id; ulam])), Value_unknown
   | Lprim(Praise, [Levent(arg, ev)]) ->
       let (ulam, approx) = close fenv cenv arg in
-      (Uprim(Praise, [ulam], Debuginfo.from_raise ev),
-       Value_unknown)
+      mkulambda_dbg (Debuginfo.from_raise ev)(Uprim(Praise, [ulam])),
+      Value_unknown
   | Lprim(p, args) ->
       simplif_prim p (close_list_approx fenv cenv args) Debuginfo.none
   | Lswitch(arg, sw) ->
@@ -630,22 +638,22 @@ let rec close fenv cenv = function
         close_switch fenv cenv sw.sw_consts sw.sw_numconsts sw.sw_failaction
       and block_index, block_actions =
         close_switch fenv cenv sw.sw_blocks sw.sw_numblocks sw.sw_failaction in
-      (Uswitch(uarg,
+      mk (Uswitch(uarg,
                {us_index_consts = const_index;
                 us_actions_consts = const_actions;
                 us_index_blocks = block_index;
-                us_actions_blocks = block_actions}),
-       Value_unknown)
+                us_actions_blocks = block_actions})),
+      Value_unknown
   | Lstaticraise (i, args) ->
-      (Ustaticfail (i, close_list fenv cenv args), Value_unknown)
+      mk (Ustaticfail (i, close_list fenv cenv args)), Value_unknown
   | Lstaticcatch(body, (i, vars), handler) ->
       let (ubody, _) = close fenv cenv body in
       let (uhandler, _) = close fenv cenv handler in
-      (Ucatch(i, vars, ubody, uhandler), Value_unknown)
+      mk (Ucatch(i, vars, ubody, uhandler)), Value_unknown
   | Ltrywith(body, id, handler) ->
       let (ubody, _) = close fenv cenv body in
       let (uhandler, _) = close fenv cenv handler in
-      (Utrywith(ubody, id, uhandler), Value_unknown)
+      mk (Utrywith(ubody, id, uhandler)), Value_unknown
   | Lifthenelse(arg, ifso, ifnot) ->
       begin match close fenv cenv arg with
         (uarg, Value_constptr n) ->
@@ -654,24 +662,24 @@ let rec close fenv cenv = function
       | (uarg, _ ) ->
           let (uifso, _) = close fenv cenv ifso in
           let (uifnot, _) = close fenv cenv ifnot in
-          (Uifthenelse(uarg, uifso, uifnot), Value_unknown)
+          mk (Uifthenelse(uarg, uifso, uifnot)), Value_unknown
       end
   | Lsequence(lam1, lam2) ->
       let (ulam1, _) = close fenv cenv lam1 in
       let (ulam2, approx) = close fenv cenv lam2 in
-      (Usequence(ulam1, ulam2), approx)
+      mk (Usequence(ulam1, ulam2)), approx
   | Lwhile(cond, body) ->
       let (ucond, _) = close fenv cenv cond in
       let (ubody, _) = close fenv cenv body in
-      (Uwhile(ucond, ubody), Value_unknown)
+      mk (Uwhile(ucond, ubody)), Value_unknown
   | Lfor(id, lo, hi, dir, body) ->
       let (ulo, _) = close fenv cenv lo in
       let (uhi, _) = close fenv cenv hi in
       let (ubody, _) = close fenv cenv body in
-      (Ufor(id, ulo, uhi, dir, ubody), Value_unknown)
+      mk (Ufor(id, ulo, uhi, dir, ubody)), Value_unknown
   | Lassign(id, lam) ->
       let (ulam, _) = close fenv cenv lam in
-      (Uassign(id, ulam), Value_unknown)
+      mk (Uassign(id, ulam)), Value_unknown
   | Levent(lam, ev) ->
       let (ulam, approx) = close fenv cenv lam in
       (add_debug_info ev ulam, approx)
@@ -745,18 +753,25 @@ and close_functions fenv cenv fun_defs =
   let useless_env = ref initially_closed in
   (* Translate each function definition *)
   let clos_fundef (id, params, body, fundesc) env_pos =
+    let dbg = match body with
+      | Levent (_,ev) -> Debuginfo.from_event ev
+      | _             -> Debuginfo.none in
     let env_param = Ident.create "env" in
     let cenv_fv =
       build_closure_env env_param (fv_pos - env_pos) fv in
     let cenv_body =
       List.fold_right2
         (fun (id, params, arity, body) pos env ->
-          Tbl.add id (Uoffset(Uvar env_param, pos - env_pos)) env)
+          Tbl.add id (mkulambda (Uoffset(mkulambda (Uvar env_param), pos - env_pos))) env)
         uncurried_defs clos_offsets cenv_fv in
     let (ubody, approx) = close fenv_rec cenv_body body in
     if !useless_env && occurs_var env_param ubody then useless_env := false;
     let fun_params = if !useless_env then params else params @ [env_param] in
-    ((fundesc.fun_label, fundesc.fun_arity, fun_params, ubody),
+    ({ uf_dbg    = dbg;
+       uf_label  = fundesc.fun_label;
+       uf_arity  = fundesc.fun_arity;
+       uf_params = fun_params;
+       uf_body   = ubody },
      (id, env_pos, Value_closure(fundesc, approx))) in
   (* Translate all function definitions. *)
   let clos_info_list =
@@ -780,17 +795,17 @@ and close_functions fenv cenv fun_defs =
   (* Return the Uclosure node and the list of all identifiers defined,
      with offsets and approximations. *)
   let (clos, infos) = List.split clos_info_list in
-  (Uclosure(clos, List.map (close_var fenv cenv) fv), infos)
+  mkulambda (Uclosure(clos, List.map (close_var fenv cenv) fv)), infos
 
 (* Same, for one non-recursive function *)
 
 and close_one_function fenv cenv id funct =
   match close_functions fenv cenv [id, funct] with
-      ((Uclosure([_, _, params, body], _) as clos),
+      (({ul_desc=Uclosure([f], _)} as clos),
        [_, _, (Value_closure(fundesc, _) as approx)]) ->
         (* See if the function can be inlined *)
-        if lambda_smaller body (!Clflags.inline_threshold + List.length params)
-        then fundesc.fun_inline <- Some(params, body);
+        if lambda_smaller f.uf_body (!Clflags.inline_threshold + List.length f.uf_params)
+        then fundesc.fun_inline <- Some(f.uf_params, f.uf_body);
         (clos, approx)
     | _ -> fatal_error "Closure.close_one_function"
 
