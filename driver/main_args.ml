@@ -718,6 +718,7 @@ struct
     mk_dcombine F._dcombine;
     mk_dlive F._dlive;
     mk_dspill F._dspill;
+    mk_dsplit F._dsplit;
     mk_dinterf F._dinterf;
     mk_dprefer F._dprefer;
     mk_dalloc F._dalloc;
@@ -760,6 +761,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dcombine F._dcombine;
     mk_dlive F._dlive;
     mk_dspill F._dspill;
+    mk_dsplit F._dsplit;
     mk_dinterf F._dinterf;
     mk_dprefer F._dprefer;
     mk_dalloc F._dalloc;
