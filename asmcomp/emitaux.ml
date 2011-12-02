@@ -161,7 +161,7 @@ let emit_frames a =
       and kind = match d.dinfo_kind with
         | Dinfo_call  -> 0
         | Dinfo_raise -> 1
-        | Dinfo_event -> failwith "emit_frame" in
+        | _ -> failwith "emit_frame" in
       let info =
         Int64.add (Int64.shift_left (Int64.of_int line) 44) (
         Int64.add (Int64.shift_left (Int64.of_int char_start) 36) (

@@ -14,6 +14,7 @@ open Lexing
 open Location
 
 type kind =
+  | Dinfo_none
   | Dinfo_call
   | Dinfo_raise
   | Dinfo_event
@@ -27,18 +28,27 @@ type t = {
 }
 
 let none = {
-  dinfo_kind = Dinfo_call;
+  dinfo_kind = Dinfo_none;
   dinfo_file = "";
   dinfo_line = 0;
   dinfo_char_start = 0;
   dinfo_char_end = 0
 }
 
+let is_none d =
+  d.dinfo_kind = Dinfo_none
+
 let to_string d =
-  if d == none
+  if d = none
   then ""
-  else Printf.sprintf "{%s:%d,%d-%d}"
-           d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end
+  else
+    let k = match d.dinfo_kind with
+      | Dinfo_none  -> "*"
+      | Dinfo_call  -> "c"
+      | Dinfo_raise -> "r"
+      | Dinfo_event -> "e" in
+    Printf.sprintf "{%s:%d,%d-%d|%s}"
+           d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end k
 
 let check d =
   let env =
@@ -69,8 +79,8 @@ let from_call  = from Dinfo_call
 let from_raise = from Dinfo_raise
 let from_event = from Dinfo_event
 
-let needs_frame ev =
-  ev != none &&
-  match ev.dinfo_kind with
-    | Dinfo_event -> false
-    | _           -> true
+let needs_frame ev = match ev.dinfo_kind with
+  | Dinfo_none 
+  | Dinfo_event -> false
+  | Dinfo_raise
+  | Dinfo_call  -> true

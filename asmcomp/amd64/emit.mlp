@@ -335,7 +335,7 @@ let float_constants = ref ([] : (int * string) list)
 let last_line = ref (-1)
 
 let emit_instr fallthrough i =
-  if i.dbg != Debuginfo.none && !last_line <> i.dbg.Debuginfo.dinfo_line
+  if not (Debuginfo.is_none i.dbg) && !last_line <> i.dbg.Debuginfo.dinfo_line
   then begin
     last_line := i.dbg.Debuginfo.dinfo_line;
     `	.line {emit_int !last_line}\n`

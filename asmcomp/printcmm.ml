@@ -167,7 +167,7 @@ and sequence ppf cmm = match cmm.cmm_desc with
   | _ -> expression ppf cmm
 
 and expression ppf e =
-  if e.cmm_dbg == Debuginfo.none then
+  if Debuginfo.is_none e.cmm_dbg then
     fprintf ppf "%a" expr_desc e.cmm_desc
   else
     fprintf ppf "%s:%a" (Debuginfo.to_string e.cmm_dbg) expr_desc e.cmm_desc

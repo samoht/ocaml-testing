@@ -37,7 +37,7 @@ let rec lam_desc ppf = function
         List.iter (fprintf ppf "@ %a" Ident.print)in
       let one_fun ppf f =
         fprintf ppf "(";
-        if f.uf_dbg != Debuginfo.none then
+        if not (Debuginfo.is_none f.uf_dbg) then
           fprintf ppf "%s@ " (Debuginfo.to_string f.uf_dbg);
         fprintf ppf "fun@ %s@ %d @[<2>%a@] @[<2>%a@])"
           f.uf_label f.uf_arity idents f.uf_params lam f.uf_body in
@@ -133,7 +133,7 @@ and sequence ppf ulam = match ulam.ul_desc with
       lam ppf ulam
 
 and lam ppf ulam =
-  if ulam.ul_dbg == Debuginfo.none then
+  if Debuginfo.is_none ulam.ul_dbg then
     lam_desc ppf ulam.ul_desc
   else
     fprintf ppf "@[<2>(%s %a)@]"

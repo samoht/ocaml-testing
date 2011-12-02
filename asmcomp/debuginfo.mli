@@ -11,6 +11,7 @@
 (***********************************************************************)
 
 type kind =
+  | Dinfo_none
   | Dinfo_call
   | Dinfo_raise
   | Dinfo_event
@@ -24,6 +25,10 @@ type t = {
 }
 
 val none: t
+
+(* XXX Sometimes, physical and structural equality is not preserved (???),
+   so it's better to use this function instead of [(==)none] *)
+val is_none : t -> bool
 
 val to_string: t -> string
 val check: t -> unit
