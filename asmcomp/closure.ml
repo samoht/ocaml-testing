@@ -377,8 +377,10 @@ let rec bind_params_rec subst params args body =
         let body' =
           bind_params_rec (Tbl.add p1 (mk (Uvar p1')) subst) pl al body in
         if occurs_var p1 body then mk (Ulet(p1', a1, body'))
-        else if no_effects a1 then body'
-        else mk (Usequence(a1, body'))
+        else if no_effects a1 then
+          body'
+        else
+          mk (Usequence(a1, body'))
       end
   | (_, _) -> assert false
 
@@ -465,13 +467,7 @@ let rec add_debug_info ev u =
         { u with ul_desc = Usequence(u1, add_debug_info ev u2) }
       | _ -> { u with ul_dbg = Debuginfo.from_event ev }
       end
-  | Lev_function -> u
-  | Lev_before   ->
-      begin match u.ul_desc with
-      | Usequence(u1,u2) ->
-        { u with ul_desc = Usequence(add_debug_info ev u1, u2) }
-      | _ -> { u with ul_dbg = (Debuginfo.from_event ev) }
-      end
+  | _ -> u
 
 (* Uncurry an expression and explicitate closures.
    Also return the approximation of the expression.
@@ -603,7 +599,7 @@ let rec close fenv cenv lam =
         let (ubody, approx) = close fenv_body cenv body in
         mk (Uletrec(udefs, ubody)), approx
       end
-  | Lprim(Pgetglobal id, []) as lam ->
+  | Lprim(Pgetglobal id, []) ->
       check_constant_result lam
                             (getglobal id)
                             (Compilenv.global_approx id)
@@ -754,8 +750,8 @@ and close_functions fenv cenv fun_defs =
   (* Translate each function definition *)
   let clos_fundef (id, params, body, fundesc) env_pos =
     let dbg = match body with
-      | Levent (_,ev) -> Debuginfo.from_event ev
-      | _             -> Debuginfo.none in
+      | Levent (_,({lev_kind=Lev_function} as ev)) -> Debuginfo.from_event ev
+      | _ -> Debuginfo.none in
     let env_param = Ident.create "env" in
     let cenv_fv =
       build_closure_env env_param (fv_pos - env_pos) fv in
