@@ -344,9 +344,6 @@ val mutable instr_seq = dummy_instr
 method insert_debug desc dbg arg res =
   instr_seq <- instr_cons_debug desc arg res dbg instr_seq
 
-(*method insert desc arg res =
-  instr_seq <- instr_cons desc arg res instr_seq
-*)
 method extract =
   let rec extract res i =
     if i == dummy_instr
@@ -574,8 +571,8 @@ method emit_expr env exp =
       let r = join r1 s1 r2 s2 in
       self#insert_debug
         (Itrywith(s1#extract,
-                  instr_cons (Iop Imove) [|Proc.loc_exn_bucket|] rv
-                             (s2#extract)))
+                  instr_cons_debug (Iop Imove) [|Proc.loc_exn_bucket|] rv
+                             dbg (s2#extract)))
         dbg [||] [||];
       r
     
@@ -785,7 +782,7 @@ method emit_tail env exp =
       let s2 = self#emit_tail_sequence (Tbl.add v rv env) e2 in
       self#insert_debug
         (Itrywith(s1#extract,
-                  instr_cons (Iop Imove) [|Proc.loc_exn_bucket|] rv s2))
+                  instr_cons_debug (Iop Imove) [|Proc.loc_exn_bucket|] rv dbg s2))
         dbg [||] [||];
       begin match opt_r1 with
         None -> ()

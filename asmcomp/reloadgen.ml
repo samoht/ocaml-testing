@@ -30,7 +30,7 @@ let access_stack r =
 let insert_move src dst next =
   if src.loc = dst.loc
   then next
-  else instr_cons (Iop Imove) [|src|] [|dst|] next
+  else instr_cons_debug (Iop Imove) [|src|] [|dst|] next.dbg next
 
 let insert_moves src dst next =
   let rec insmoves i =
@@ -116,19 +116,19 @@ method private reload i =
   | Iswitch(index, cases) ->
       let newarg = self#makeregs i.arg in
       insert_moves i.arg newarg
-        (instr_cons (Iswitch(index, Array.map (self#reload) cases)) newarg [||]
-          (self#reload i.next))
+        (instr_cons_debug (Iswitch(index, Array.map (self#reload) cases)) newarg [||]
+          i.dbg (self#reload i.next))
   | Iloop body ->
-      instr_cons (Iloop(self#reload body)) [||] [||] (self#reload i.next)
+      instr_cons_debug (Iloop(self#reload body)) [||] [||] i.dbg (self#reload i.next)
   | Icatch(nfail, body, handler) ->
       instr_cons
         (Icatch(nfail, self#reload body, self#reload handler)) [||] [||]
         (self#reload i.next)
-  | Iexit i ->
-      instr_cons (Iexit i) [||] [||] dummy_instr
+  | Iexit ic ->
+      instr_cons_debug (Iexit ic) [||] [||] i.dbg dummy_instr
   | Itrywith(body, handler) ->
-      instr_cons (Itrywith(self#reload body, self#reload handler)) [||] [||]
-        (self#reload i.next)
+      instr_cons_debug (Itrywith(self#reload body, self#reload handler)) [||] [||]
+        i.dbg (self#reload i.next)
 (*  | Ievent -> self#reload i.next *)
 
 method fundecl f =
