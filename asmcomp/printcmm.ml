@@ -170,7 +170,7 @@ and expression ppf e =
   if e.cmm_dbg == Debuginfo.none then
     fprintf ppf "%a" expr_desc e.cmm_desc
   else
-    fprintf ppf "%a (%s)" expr_desc e.cmm_desc (Debuginfo.to_string e.cmm_dbg)
+    fprintf ppf "%s:%a" (Debuginfo.to_string e.cmm_dbg) expr_desc e.cmm_desc
 
 let fundecl ppf f =
   let print_cases ppf cases =
