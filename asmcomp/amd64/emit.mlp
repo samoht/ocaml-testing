@@ -332,13 +332,23 @@ let tailrec_entry_point = ref 0
 
 let float_constants = ref ([] : (int * string) list)
 
+let line_tbl = Hashtbl.create 1024
 let last_line = ref (-1)
+let print_file = ref true
 
 let emit_instr fallthrough i =
-  if not (Debuginfo.is_none i.dbg) && !last_line <> i.dbg.Debuginfo.dinfo_line
+  let line = i.dbg.Debuginfo.dinfo_line in
+  if not (Debuginfo.is_none i.dbg) &&
+     !last_line <> line &&
+     not (Hashtbl.mem line_tbl line)
   then begin
-    last_line := i.dbg.Debuginfo.dinfo_line;
-    `	.line {emit_int !last_line}\n`
+    if !print_file then (
+      print_file := false;
+      `	.file 1 {emit_string_literal i.dbg.Debuginfo.dinfo_file}\n`
+    );
+    last_line := line;
+    Hashtbl.add line_tbl line ();
+    `	.loc 1 {emit_int !last_line}\n`
   end;
   match i.desc with
       Lend -> ()
