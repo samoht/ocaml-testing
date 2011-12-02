@@ -801,7 +801,10 @@ and close_one_function fenv cenv id funct =
        [_, _, (Value_closure(fundesc, _) as approx)]) ->
         (* See if the function can be inlined *)
         if lambda_smaller f.uf_body (!Clflags.inline_threshold + List.length f.uf_params)
-        then fundesc.fun_inline <- Some(f.uf_params, f.uf_body);
+        then fundesc.fun_inline <- 
+          Some(f.uf_params,
+               (* reset debuginging information in inlined body *)
+               { f.uf_body with ul_dbg = Debuginfo.none });
         (clos, approx)
     | _ -> fatal_error "Closure.close_one_function"
 
