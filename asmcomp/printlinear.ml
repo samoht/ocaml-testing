@@ -23,6 +23,8 @@ let label ppf l =
   Format.fprintf ppf "L%i" l
 
 let instr ppf i =
+  if i.dbg != Debuginfo.none then
+    fprintf ppf "==%s==@," (Debuginfo.to_string i.dbg);
   begin match i.desc with
   | Lend -> ()
   | Lop op ->
