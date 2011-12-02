@@ -27,7 +27,7 @@ let rec lam_desc ppf = function
   | Udirect_apply(f, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
-      fprintf ppf "@[<2>(apply@ %s %a)@]" f lams largs
+      fprintf ppf "@[<2>(apply*@ %s %a)@]" f lams largs
   | Ugeneric_apply(lfun, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
