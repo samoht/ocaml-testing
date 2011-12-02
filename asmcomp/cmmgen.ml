@@ -893,6 +893,7 @@ let rec transl ulam =
       List.iter
         (fun f -> Queue.add (f.uf_label, f.uf_params, f.uf_body) functions)
         fundecls;
+      let mk = mkexpr_dbg (List.hd fundecls).uf_dbg in
       mk(Cconst_symbol lbl)
   | Uclosure(fundecls, clos_vars) ->
       let block_size =
@@ -902,6 +903,7 @@ let rec transl ulam =
             List.map transl clos_vars
         | f :: rem ->
             Queue.add (f.uf_label, f.uf_params, f.uf_body) functions;
+            let mk = mkexpr_dbg f.uf_dbg in
             let header =
               if pos = 0
               then mk(alloc_closure_header block_size)

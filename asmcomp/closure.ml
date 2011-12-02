@@ -465,13 +465,13 @@ let rec add_debug_info ev u =
         { u with ul_desc = Usequence(u1, add_debug_info ev u2) }
       | _ -> { u with ul_dbg = Debuginfo.from_event ev }
       end
-  | Lev_before ->
+  | Lev_function -> u
+  | Lev_before   ->
       begin match u.ul_desc with
       | Usequence(u1,u2) ->
         { u with ul_desc = Usequence(add_debug_info ev u1, u2) }
       | _ -> { u with ul_dbg = (Debuginfo.from_event ev) }
       end
-  | _ -> { u with ul_dbg = (Debuginfo.from_event ev) }
 
 (* Uncurry an expression and explicitate closures.
    Also return the approximation of the expression.

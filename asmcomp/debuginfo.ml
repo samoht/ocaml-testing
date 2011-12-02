@@ -50,7 +50,9 @@ let check d =
   end
 
 let from_location kind loc =
-  if loc.loc_ghost then none else
+  if loc == Location.none then
+    none
+  else
   { dinfo_kind = kind;
     dinfo_file = loc.loc_start.pos_fname;
     dinfo_line = loc.loc_start.pos_lnum;
