@@ -20,17 +20,22 @@ open Lambda
 
 type function_label = string
 
-type ulambda =
+type ulambda = {
+  u_desc  : ulambda_desc;
+  u_debug : Debuginfo.t;
+}
+
+and ulambda_desc =
     Uvar of Ident.t
   | Uconst of structured_constant * string option
-  | Udirect_apply of function_label * ulambda list * Debuginfo.t
-  | Ugeneric_apply of ulambda * ulambda list * Debuginfo.t
+  | Udirect_apply of function_label * ulambda list
+  | Ugeneric_apply of ulambda * ulambda list
   | Uclosure of (function_label * int * Ident.t list * ulambda) list
               * ulambda list
   | Uoffset of ulambda * int
   | Ulet of Ident.t * ulambda * ulambda
   | Uletrec of (Ident.t * ulambda) list * ulambda
-  | Uprim of primitive * ulambda list * Debuginfo.t
+  | Uprim of primitive * ulambda list
   | Uswitch of ulambda * ulambda_switch
   | Ustaticfail of int * ulambda list
   | Ucatch of int * Ident.t list * ulambda * ulambda
@@ -40,7 +45,7 @@ type ulambda =
   | Uwhile of ulambda * ulambda
   | Ufor of Ident.t * ulambda * ulambda * direction_flag * ulambda
   | Uassign of Ident.t * ulambda
-  | Usend of meth_kind * ulambda * ulambda * ulambda list * Debuginfo.t
+  | Usend of meth_kind * ulambda * ulambda * ulambda list
 
 and ulambda_switch =
   { us_index_consts: int array;

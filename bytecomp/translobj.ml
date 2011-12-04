@@ -18,6 +18,12 @@ open Asttypes
 open Longident
 open Lambda
 
+(* Create a lambda term with a dummy location *)
+let lambda l_desc = {
+  l_loc = Location.none;
+  l_desc;
+}
+
 (* Get oo primitives identifiers *)
 
 let oo_prim name =
@@ -35,13 +41,13 @@ let share c =
   match c with
     Const_block (n, l) when l <> [] ->
       begin try
-        Lvar (Hashtbl.find consts c)
+        lambda (Lvar (Hashtbl.find consts c))
       with Not_found ->
         let id = Ident.create "shared" in
         Hashtbl.add consts c id;
-        Lvar id
+        lambda (Lvar id)
       end
-  | _ -> Lconst c
+  | _ -> lambda (Lconst c)
 
 (* Collect labels *)
 
@@ -50,14 +56,14 @@ let method_cache = ref lambda_unit
 let method_count = ref 0
 let method_table = ref []
 
-let meth_tag s = Lconst(Const_base(Const_int(Btype.hash_variant s)))
+let meth_tag s = lambda (Lconst(Const_base(Const_int(Btype.hash_variant s))))
 
 let next_cache tag =
   let n = !method_count in
   incr method_count;
-  (tag, [!method_cache; Lconst(Const_base(Const_int n))])
+  (tag, [!method_cache; lambda (Lconst(Const_base(Const_int n)))])
 
-let rec is_path = function
+let rec is_path l = match l.l_desc with
     Lvar _ | Lprim (Pgetglobal _, []) | Lconst _ -> true
   | Lprim (Pfield _, [lam]) -> is_path lam
   | Lprim ((Parrayrefu _ | Parrayrefs _), [lam1; lam2]) ->
@@ -88,8 +94,8 @@ let reset_labels () =
 
 (* Insert labels *)
 
-let string s = Lconst (Const_base (Const_string s))
-let int n = Lconst (Const_base (Const_int n))
+let string s = lambda (Lconst (Const_base (Const_string s)))
+let int n = lambda (Lconst (Const_base (Const_int n)))
 
 let prim_makearray =
   { prim_name = "caml_make_vect"; prim_arity = 2; prim_alloc = true;
@@ -98,23 +104,23 @@ let prim_makearray =
 let transl_label_init expr =
   let expr =
     Hashtbl.fold
-      (fun c id expr -> Llet(Alias, id, Lconst c, expr))
+      (fun c id expr -> lambda (Llet(Alias, id, lambda (Lconst c), expr)))
       consts expr
   in
   reset_labels ();
   expr
 
 let transl_store_label_init glob size f arg =
-  method_cache := Lprim(Pfield size, [Lprim(Pgetglobal glob, [])]);
+  method_cache := lambda (Lprim(Pfield size, [lambda (Lprim(Pgetglobal glob, []))]));
   let expr = f arg in
   let (size, expr) =
     if !method_count = 0 then (size, expr) else
-    (size+1,
-     Lsequence(
-     Lprim(Psetfield(size, false),
-           [Lprim(Pgetglobal glob, []);
-            Lprim (Pccall prim_makearray, [int !method_count; int 0])]),
-     expr))
+      (size+1,
+       lambda (Lsequence(
+         lambda (Lprim(Psetfield(size, false),
+                       [lambda (Lprim(Pgetglobal glob, []));
+                        lambda (Lprim (Pccall prim_makearray, [int !method_count; int 0]))])),
+         expr)))
   in
   (size, transl_label_init expr)
 
@@ -132,28 +138,28 @@ let oo_add_class id =
 let oo_wrap env req f x =
   if !wrapping then
     if !cache_required then f x else
-    try cache_required := true; let lam = f x in cache_required := false; lam
-    with exn -> cache_required := false; raise exn
+      try cache_required := true; let lam = f x in cache_required := false; lam
+      with exn -> cache_required := false; raise exn
   else try
-    wrapping := true;
-    cache_required := req;
-    top_env := env;
-    classes := [];
-    method_ids := IdentSet.empty;
-    let lambda = f x in
-    let lambda =
-      List.fold_left
-        (fun lambda id ->
-          Llet(StrictOpt, id,
-               Lprim(Pmakeblock(0, Mutable),
-                     [lambda_unit; lambda_unit; lambda_unit]),
-               lambda))
-        lambda !classes
-    in
-    wrapping := false;
-    top_env := Env.empty;
-    lambda
-  with exn ->
-    wrapping := false;
-    top_env := Env.empty;
-    raise exn
+         wrapping := true;
+         cache_required := req;
+         top_env := env;
+         classes := [];
+         method_ids := IdentSet.empty;
+         let l = f x in
+         let lambda =
+           List.fold_left
+             (fun expr id ->
+               lambda (Llet(StrictOpt, id,
+                            lambda (Lprim(Pmakeblock(0, Mutable),
+                                          [lambda_unit; lambda_unit; lambda_unit])),
+                            expr)))
+             l !classes
+         in
+         wrapping := false;
+         top_env := Env.empty;
+         lambda
+    with exn ->
+      wrapping := false;
+      top_env := Env.empty;
+      raise exn
