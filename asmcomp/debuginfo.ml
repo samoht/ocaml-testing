@@ -44,10 +44,10 @@ let mkdbg dbg exp = {exp; dbg}
 let mk exp = mkdbg none exp
 
 let is_none d =
-  d.dinfo_kind <> Dinfo_none
+  d.dinfo_kind = Dinfo_none
 
 let string_of_dbg d =
-  if d = none
+  if is_none d
   then ""
   else
     let k = match d.dinfo_kind with
