@@ -17,6 +17,7 @@
 open Misc
 open Arch
 open Proc
+open Debuginfo
 open Cmm
 open Reg
 open Mach
@@ -31,26 +32,26 @@ type addressing_expr =
   | Ascaledadd of expression * expression * int
 
 let rec select_addr exp =
-  match exp.cmm_desc with
+  match exp.exp with
     Cconst_symbol s when not !Clflags.dlcode ->
       (Asymbol s, 0)
-  | Cop((Caddi | Cadda), [arg; {cmm_desc=Cconst_int m}]) ->
+  | Cop((Caddi | Cadda), [arg; {exp=Cconst_int m}]) ->
       let (a, n) = select_addr arg in (a, n + m)
-  | Cop((Csubi | Csuba), [arg; {cmm_desc=Cconst_int m}]) ->
+  | Cop((Csubi | Csuba), [arg; {exp=Cconst_int m}]) ->
       let (a, n) = select_addr arg in (a, n - m)
-  | Cop((Caddi | Cadda), [{cmm_desc=Cconst_int m}; arg]) ->
+  | Cop((Caddi | Cadda), [{exp=Cconst_int m}; arg]) ->
       let (a, n) = select_addr arg in (a, n + m)
-  | Cop(Clsl, [arg; {cmm_desc=Cconst_int(1|2|3 as shift)}]) ->
+  | Cop(Clsl, [arg; {exp=Cconst_int(1|2|3 as shift)}]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, 1 lsl shift), n lsl shift)
       | _ -> (Alinear exp, 0)
       end
-  | Cop(Cmuli, [arg; {cmm_desc=Cconst_int(2|4|8 as mult)}]) ->
+  | Cop(Cmuli, [arg; {exp=Cconst_int(2|4|8 as mult)}]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, mult), n * mult)
       | _ -> (Alinear exp, 0)
       end
-  | Cop(Cmuli, [{cmm_desc=Cconst_int(2|4|8 as mult)}; arg]) ->
+  | Cop(Cmuli, [{exp=Cconst_int(2|4|8 as mult)}; arg]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, mult), n * mult)
       | _ -> (Alinear exp, 0)
@@ -122,7 +123,7 @@ method is_immediate n = n <= 0x7FFFFFFF && n >= -0x80000000
 method is_immediate_natint n = n <= 0x7FFFFFFFn && n >= -0x80000000n
 
 method select_addressing exp =
-  let mk = mkexpr_dbg exp.cmm_dbg in
+  let mk = mkdbg exp.Debuginfo.dbg in
   let (a, d) = select_addr exp in
   (* PR#4625: displacement must be a signed 32-bit immediate *)
   if d < -0x8000_0000 || d > 0x7FFF_FFFF
@@ -140,8 +141,8 @@ method select_addressing exp =
         (Iindexed2scaled(scale, d), mk(Ctuple[e1; e2]))
 
 method! select_store addr exp =
-  let mk = mkexpr_dbg exp.cmm_dbg in
-  match exp.cmm_desc with
+  let mk = mkdbg exp.Debuginfo.dbg in
+  match exp.exp with
     Cconst_int n when self#is_immediate n ->
       (Ispecific(Istore_int(Nativeint.of_int n, addr)), mk(Ctuple []))
   | Cconst_natint n when self#is_immediate_natint n ->
@@ -156,7 +157,6 @@ method! select_store addr exp =
       super#select_store addr exp
 
 method! select_operation op args =
-  let mk = mkexpr in
   match op with
   (* Recognize the LEA instruction *)
     Caddi | Cadda | Csubi | Csuba ->
@@ -168,14 +168,14 @@ method! select_operation op args =
   (* Recognize (x / cst) and (x % cst) only if cst is a power of 2. *)
   | Cdivi ->
       begin match args with
-        [arg1; {cmm_desc=Cconst_int n}] when self#is_immediate n
+        [arg1; {exp=Cconst_int n}] when self#is_immediate n
                                && n = 1 lsl (Misc.log2 n) ->
           (Iintop_imm(Idiv, n), [arg1])
       | _ -> (Iintop Idiv, args)
       end
   | Cmodi ->
       begin match args with
-        [arg1; {cmm_desc=Cconst_int n}] when self#is_immediate n
+        [arg1; {exp=Cconst_int n}] when self#is_immediate n
                                && n = 1 lsl (Misc.log2 n) ->
           (Iintop_imm(Imod, n), [arg1])
       | _ -> (Iintop Imod, args)
@@ -192,7 +192,7 @@ method! select_operation op args =
   (* Recognize store instructions *)
   | Cstore Word ->
       begin match args with
-        [loc; {cmm_desc=Cop(Caddi, [{cmm_desc=Cop(Cload _, [loc'])}; {cmm_desc=Cconst_int n}])}]
+        [loc; {exp=Cop(Caddi, [{exp=Cop(Cload _, [loc'])}; {exp=Cconst_int n}])}]
         when loc = loc' && self#is_immediate n ->
           let (addr, arg) = self#select_addressing loc in
           (Ispecific(Ioffset_loc(n, addr)), [arg])
@@ -205,11 +205,11 @@ method! select_operation op args =
 
 method select_floatarith commutative regular_op mem_op args =
   match args with
-    [arg1; {cmm_desc=Cop(Cload (Double|Double_u), [loc2])}] ->
+    [arg1; {exp=Cop(Cload (Double|Double_u), [loc2])}] ->
       let (addr, arg2) = self#select_addressing loc2 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg1; arg2])
-  | [{cmm_desc=Cop(Cload (Double|Double_u), [loc1])}; arg2] when commutative ->
+  | [{exp=Cop(Cload (Double|Double_u), [loc1])}; arg2] when commutative ->
       let (addr, arg1) = self#select_addressing loc1 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg2; arg1])

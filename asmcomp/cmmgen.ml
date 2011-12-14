@@ -20,27 +20,27 @@ open Asttypes
 open Primitive
 open Types
 open Lambda
+open Debuginfo
 open Clambda
 open Cmm
 open Cmx_format
 
+
 (* Local binding of complex expressions *)
 
 let bind name arg fn =
-  match arg.cmm_desc with
+  match arg.exp with
     Cvar _ | Cconst_int _ | Cconst_natint _ | Cconst_symbol _
   | Cconst_pointer _ | Cconst_natpointer _ -> fn arg
   | _ -> let id = Ident.create name in
-         let mk = mkexpr in
-         mk (Clet(id, arg, fn (mk (Cvar id))))
+         mk(Clet(id, arg, fn (mk(Cvar id))))
 
 let bind_nonvar name arg fn =
-  match arg.cmm_desc with
+  match arg.exp with
     Cconst_int _ | Cconst_natint _ | Cconst_symbol _
   | Cconst_pointer _ | Cconst_natpointer _ -> fn arg
   | _ -> let id = Ident.create name in
-         let mk = mkexpr in
-         mk (Clet(id, arg, fn (mk (Cvar id))))
+         mk(Clet(id, arg, fn (mk(Cvar id))))
 
 (* Block headers. Meaning of the tag field: see stdlib/obj.ml *)
 
@@ -76,40 +76,34 @@ let max_repr_int = max_int asr 1
 let min_repr_int = min_int asr 1
 
 let int_const dbg n =
-  let mk = mkexpr_dbg dbg in
   if n <= max_repr_int && n >= min_repr_int
-  then mk (Cconst_int((n lsl 1) + 1))
-  else mk (Cconst_natint
-             (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n))
+  then mkdbg dbg (Cconst_int((n lsl 1) + 1))
+  else mkdbg dbg (Cconst_natint
+                     (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n))
 
 let add_const c n =
   if n = 0 then c else
-    let mk = mkexpr_dbg c.cmm_dbg in
-    mk (Cop(Caddi, [c; mk (Cconst_int n)]))
+    mkdbg c.dbg (Cop(Caddi, [c; mkdbg c.dbg (Cconst_int n)]))
 
-let incr_int c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
-    Cconst_int n when n < max_int -> mk (Cconst_int(n+1))
-  | Cop(Caddi, [c; {cmm_desc=Cconst_int n}]) when n < max_int -> add_const c (n + 1)
+let incr_int c = match c.exp with
+    Cconst_int n when n < max_int -> mkdbg c.dbg (Cconst_int(n+1))
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) when n < max_int -> add_const c (n + 1)
   | _ -> add_const c 1
 
-let decr_int c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
-    Cconst_int n when n > min_int -> mk (Cconst_int(n-1))
-  | Cop(Caddi, [c; {cmm_desc=Cconst_int n}]) when n > min_int -> add_const c (n - 1)
+let decr_int c = match c.exp with
+    Cconst_int n when n > min_int -> mkdbg c.dbg (Cconst_int(n-1))
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) when n > min_int -> add_const c (n - 1)
   | _ -> add_const c (-1)
 
 let add_int c1 c2 =
-  let mk = mkexpr_dbg c1.cmm_dbg in
-  match (c1.cmm_desc, c2.cmm_desc) with
-    (Cop(Caddi, [c1; {cmm_desc=Cconst_int n1}]),
-     Cop(Caddi, [c2; {cmm_desc=Cconst_int n2}])) when no_overflow_add n1 n2 ->
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Caddi, [c1; {exp=Cconst_int n1}]),
+     Cop(Caddi, [c2; {exp=Cconst_int n2}])) when no_overflow_add n1 n2 ->
       add_const (mk (Cop(Caddi, [c1; c2]))) (n1 + n2)
-  | (Cop(Caddi, [c1; {cmm_desc=Cconst_int n1}]), _) ->
+  | (Cop(Caddi, [c1; {exp=Cconst_int n1}]), _) ->
       add_const (mk (Cop(Caddi, [c1; c2]))) n1
-  | (_, Cop(Caddi, [c2; {cmm_desc=Cconst_int n2}])) ->
+  | (_, Cop(Caddi, [c2; {exp=Cconst_int n2}])) ->
       add_const (mk (Cop(Caddi, [c1; c2]))) n2
   | (Cconst_int _, _) ->
       mk (Cop(Caddi, [c2; c1]))
@@ -117,14 +111,14 @@ let add_int c1 c2 =
       mk (Cop(Caddi, [c1; c2]))
 
 let sub_int c1 c2 =
-  let mk = mkexpr_dbg c1.cmm_dbg in
-  match (c1.cmm_desc, c2.cmm_desc) with
-    (Cop(Caddi, [c1; {cmm_desc=Cconst_int n1}]),
-     Cop(Caddi, [c2; {cmm_desc=Cconst_int n2}])) when no_overflow_sub n1 n2 ->
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Caddi, [c1; {exp=Cconst_int n1}]),
+     Cop(Caddi, [c2; {exp=Cconst_int n2}])) when no_overflow_sub n1 n2 ->
       add_const (mk ((Cop(Csubi, [c1; c2])))) (n1 - n2)
-  | (Cop(Caddi, [c1; {cmm_desc=Cconst_int n1}]), _) ->
+  | (Cop(Caddi, [c1; {exp=Cconst_int n1}]), _) ->
       add_const (mk (Cop(Csubi, [c1; c2]))) n1
-  | (_, Cop(Caddi, [c2; {cmm_desc=Cconst_int n2}])) when n2 <> min_int ->
+  | (_, Cop(Caddi, [c2; {exp=Cconst_int n2}])) when n2 <> min_int ->
       add_const (mk (Cop(Csubi, [c1; c2]))) (-n2)
   | (_, Cconst_int n) when n <> min_int ->
       add_const c1 (-n)
@@ -132,61 +126,61 @@ let sub_int c1 c2 =
       mk (Cop(Csubi, [c1; c2]))
 
 let mul_int c1 c2 =
-  let mk = mkexpr_dbg c1.cmm_dbg in
-  match (c1.cmm_desc, c2.cmm_desc) with
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
     (Cconst_int 0, _) -> c1
   | (Cconst_int 1, _) -> c2
   | (_, Cconst_int 0) -> c2
   | (_, Cconst_int 1) -> c1
   | (_, _) -> mk (Cop(Cmuli, [c1; c2]))
 
-let tag_int c = match c.cmm_desc with
-    Cconst_int n -> int_const c.cmm_dbg n
+let tag_int c = match c.exp with
+    Cconst_int n -> int_const c.dbg n
   | _ ->
-    let mk = mkexpr_dbg c.cmm_dbg in
+    let mk = mkdbg c.dbg in
     mk (Cop(Caddi, [mk (Cop(Clsl, [c; mk (Cconst_int 1)])); mk (Cconst_int 1)]))
 
-let force_tag_int c = match c.cmm_desc with
-    Cconst_int n -> int_const c.cmm_dbg n
+let force_tag_int c = match c.exp with
+    Cconst_int n -> int_const c.dbg n
   | _ ->
-    let mk = mkexpr_dbg c.cmm_dbg in
+    let mk = mkdbg c.dbg in
     mk (Cop(Cor, [mk (Cop(Clsl, [c; mk (Cconst_int 1)])); mk (Cconst_int 1)]))
 
 let untag_int c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
+  let mk = mkdbg c.dbg in
+  match c.exp with
     Cconst_int n -> mk (Cconst_int(n asr 1))
-  | Cop(Caddi, [{cmm_desc=Cop(Clsl, [c; {cmm_desc=Cconst_int 1}])}; {cmm_desc=Cconst_int 1}]) -> c
-  | Cop(Cor, [{cmm_desc=Cop(Casr, [c; {cmm_desc=Cconst_int n}])}; {cmm_desc=Cconst_int 1}])
+  | Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) -> c
+  | Cop(Cor, [{exp=Cop(Casr, [c; {exp=Cconst_int n}])}; {exp=Cconst_int 1}])
     when n > 0 && n < size_int * 8 ->
       mk (Cop(Casr, [c; mk (Cconst_int (n+1))]))
-  | Cop(Cor, [{cmm_desc=Cop(Clsr, [c; {cmm_desc=Cconst_int n}])}; {cmm_desc=Cconst_int 1}])
+  | Cop(Cor, [{exp=Cop(Clsr, [c; {exp=Cconst_int n}])}; {exp=Cconst_int 1}])
     when n > 0 && n < size_int * 8 ->
       mk (Cop(Clsr, [c; mk (Cconst_int (n+1))]))
-  | Cop(Cor, [c; {cmm_desc=Cconst_int 1}]) -> mk (Cop(Casr, [c; mk (Cconst_int 1)]))
+  | Cop(Cor, [c; {exp=Cconst_int 1}]) -> mk (Cop(Casr, [c; mk (Cconst_int 1)]))
   | _ -> mk (Cop(Casr, [c; mk (Cconst_int 1)]))
 
 let lsl_int c1 c2 =
-  let mk = mkexpr_dbg c1.cmm_dbg in
-  match (c1.cmm_desc, c2.cmm_desc) with
-    (Cop(Clsl, [c; {cmm_desc=Cconst_int n1}]), Cconst_int n2)
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Clsl, [c; {exp=Cconst_int n1}]), Cconst_int n2)
     when n1 > 0 && n2 > 0 && n1 + n2 < size_int * 8 ->
       mk (Cop(Clsl, [c; mk (Cconst_int (n1 + n2))]))
   | (_, _) ->
       mk (Cop(Clsl, [c1; c2]))
 
-let ignore_low_bit_int c = match c.cmm_desc with
-    Cop(Caddi, [({cmm_desc=Cop(Clsl, [_; {cmm_desc=Cconst_int 1}])} as c); {cmm_desc=Cconst_int 1}]) -> c
-  | Cop(Cor, [c; {cmm_desc=Cconst_int 1}]) -> c
+let ignore_low_bit_int c = match c.exp with
+    Cop(Caddi, [({exp=Cop(Clsl, [_; {exp=Cconst_int 1}])} as c); {exp=Cconst_int 1}]) -> c
+  | Cop(Cor, [c; {exp=Cconst_int 1}]) -> c
   | _ -> c
 
-let is_nonzero_constant c = match c.cmm_desc with
+let is_nonzero_constant c = match c.exp with
     Cconst_int n -> n <> 0
   | Cconst_natint n -> n <> 0n
   | _ -> false
 
 let safe_divmod op c1 c2 dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   if !Clflags.fast || is_nonzero_constant c2 then
     mk (Cop(op, [c1; c2]))
   else
@@ -198,22 +192,22 @@ let safe_divmod op c1 c2 dbg =
 
 (* Bool *)
 
-let test_bool c = match c.cmm_desc with
-    Cop(Caddi, [{cmm_desc=Cop(Clsl, [c; {cmm_desc=Cconst_int 1}])}; {cmm_desc=Cconst_int 1}]) -> c
-  | Cop(Clsl, [c; {cmm_desc=Cconst_int 1}]) -> c
+let test_bool c = match c.exp with
+    Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) -> c
+  | Cop(Clsl, [c; {exp=Cconst_int 1}]) -> c
   | _ ->
-    let mk = mkexpr_dbg c.cmm_dbg in
+    let mk = mkdbg c.dbg in
     mk (Cop(Ccmpi Cne, [c; mk (Cconst_int 1)]))
 
 (* Float *)
 
 let box_float c =
-  let mk = mkexpr_dbg c.cmm_dbg in
+  let mk = mkdbg c.dbg in
   mk (Cop(Calloc, [mk alloc_float_header; c]))
 
 let rec unbox_float c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
+  let mk = mkdbg c.dbg in
+  match c.exp with
     Cop(Calloc, [header; c]) -> c
   | Clet(id, exp, body) -> mk (Clet(id, exp, unbox_float body))
   | Cifthenelse(cond, e1, e2) ->
@@ -227,29 +221,29 @@ let rec unbox_float c =
 (* Complex *)
 
 let box_complex c_re c_im =
-  let mk = mkexpr_dbg c_re.cmm_dbg in
+  let mk = mkdbg c_re.dbg in
   mk (Cop(Calloc, [mk (alloc_floatarray_header 2); c_re; c_im]))
 
 let complex_re c =
-  let mk = mkexpr_dbg c.cmm_dbg in
+  let mk = mkdbg c.dbg in
   mk (Cop(Cload Double_u, [c]))
 
 let complex_im c =
-  let mk = mkexpr_dbg c.cmm_dbg in
+  let mk = mkdbg c.dbg in
   mk (Cop(Cload Double_u,
           [mk (Cop(Cadda, [c; mk (Cconst_int size_float)]))]))
 
 (* Unit *)
 
 let return_unit c =
-  let mk = mkexpr_dbg c.cmm_dbg in
+  let mk = mkdbg c.dbg in
   mk (Csequence(c, mk (Cconst_pointer 1)))
 
 let rec remove_unit c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
+  let mk = mkdbg c.dbg in
+  match c.exp with
     Cconst_pointer 1 -> mk (Ctuple [])
-  | Csequence(c, {cmm_desc=Cconst_pointer 1}) -> c
+  | Csequence(c, {exp=Cconst_pointer 1}) -> c
   | Csequence(c1, c2) ->
       mk (Csequence(c1, remove_unit c2))
   | Cifthenelse(cond, ifso, ifnot) ->
@@ -276,26 +270,26 @@ let field_address ptr n =
   if n = 0
   then ptr
   else
-    let mk = mkexpr_dbg ptr.cmm_dbg in
+    let mk = mkdbg ptr.dbg in
     mk (Cop(Cadda, [ptr; mk (Cconst_int(n * size_addr))]))
 
 let get_field ptr n =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   mk (Cop(Cload Word, [field_address ptr n]))
 
 let set_field ptr n newval =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   mk (Cop(Cstore Word, [field_address ptr n; newval]))
 
 let header ptr =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   mk (Cop(Cload Word, [mk (Cop(Cadda, [ptr; mk (Cconst_int(-size_int))]))]))
 
 let tag_offset =
   if big_endian then -1 else -size_int
 
 let get_tag ptr =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   if Proc.word_addressed then           (* If byte loads are slow *)
     mk (Cop(Cand, [header ptr; mk (Cconst_int 255)]))
   else                                  (* If byte loads are efficient *)
@@ -303,7 +297,7 @@ let get_tag ptr =
         [mk (Cop(Cadda, [ptr; mk (Cconst_int(tag_offset))]))]))
 
 let get_size ptr =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   mk (Cop(Clsr, [header ptr; mk (Cconst_int 10)]))
 
 (* Array indexing *)
@@ -315,34 +309,34 @@ let wordsize_shift = 9
 let numfloat_shift = 9 + log2_size_float - log2_size_addr
 
 let is_addr_array_hdr hdr =
-  let mk = mkexpr_dbg hdr.cmm_dbg in
+  let mk = mkdbg hdr.dbg in
   mk (Cop(Ccmpi Cne, [mk (Cop(Cand, [hdr; mk (Cconst_int 255)])); mk floatarray_tag]))
 
 let is_addr_array_ptr ptr =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
+  let mk = mkdbg ptr.dbg in
   mk (Cop(Ccmpi Cne, [get_tag ptr; mk floatarray_tag]))
 
 let addr_array_length hdr =
-  let mk = mkexpr_dbg hdr.cmm_dbg in
+  let mk = mkdbg hdr.dbg in
   mk (Cop(Clsr, [hdr; mk (Cconst_int wordsize_shift)]))
 
 let float_array_length hdr =
-  let mk = mkexpr_dbg hdr.cmm_dbg in
+  let mk = mkdbg hdr.dbg in
   mk (Cop(Clsr, [hdr; mk (Cconst_int numfloat_shift)]))
 
 let lsl_const c n =
-  let mk = mkexpr_dbg c.cmm_dbg in
+  let mk = mkdbg c.dbg in
   mk (Cop(Clsl, [c; mk (Cconst_int n)]))
 
 let array_indexing log2size ptr ofs =
-  let mk = mkexpr_dbg ptr.cmm_dbg in
-  match ofs.cmm_desc with
+  let mk = mkdbg ptr.dbg in
+  match ofs.exp with
     Cconst_int n ->
       let i = n asr 1 in
       if i = 0 then ptr else mk (Cop(Cadda, [ptr; mk (Cconst_int(i lsl log2size))]))
-  | Cop(Caddi, [{cmm_desc=Cop(Clsl, [c; {cmm_desc=Cconst_int 1}])}; {cmm_desc=Cconst_int 1}]) ->
+  | Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) ->
       mk (Cop(Cadda, [ptr; lsl_const c log2size]))
-  | Cop(Caddi, [c; {cmm_desc=Cconst_int n}]) ->
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) ->
       mk (Cop(Cadda, [mk(Cop(Cadda, [ptr; lsl_const c (log2size - 1)]));
                       mk (Cconst_int((n-1) lsl (log2size - 1)))]))
   | _ ->
@@ -350,27 +344,27 @@ let array_indexing log2size ptr ofs =
                       mk (Cconst_int((-1) lsl (log2size - 1)))]))
 
 let addr_array_ref arr ofs =
-  let mk = mkexpr_dbg arr.cmm_dbg in
+  let mk = mkdbg arr.dbg in
   mk (Cop(Cload Word, [array_indexing log2_size_addr arr ofs]))
 
 let unboxed_float_array_ref arr ofs =
-  let mk = mkexpr_dbg arr.cmm_dbg in
+  let mk = mkdbg arr.dbg in
   mk (Cop(Cload Double_u, [array_indexing log2_size_float arr ofs]))
 
 let float_array_ref arr ofs =
   box_float(unboxed_float_array_ref arr ofs)
 
 let addr_array_set arr ofs newval =
-  let mk = mkexpr_dbg arr.cmm_dbg in
+  let mk = mkdbg arr.dbg in
   mk (Cop(Cextcall("caml_modify", typ_void, false),
           [array_indexing log2_size_addr arr ofs; newval]))
 
 let int_array_set arr ofs newval =
-  let mk = mkexpr_dbg arr.cmm_dbg in
+  let mk = mkdbg arr.dbg in
   mk (Cop(Cstore Word, [array_indexing log2_size_addr arr ofs; newval]))
 
 let float_array_set arr ofs newval =
-  let mk = mkexpr_dbg arr.cmm_dbg in
+  let mk = mkdbg arr.dbg in
   mk (Cop(Cstore Double_u, [array_indexing log2_size_float arr ofs; newval]))
 
 (* String length *)
@@ -378,7 +372,7 @@ let float_array_set arr ofs newval =
 let string_length exp =
   bind "str" exp (fun str ->
     let tmp_var = Ident.create "tmp" in
-    let mk = mkexpr_dbg exp.cmm_dbg in
+    let mk = mkdbg exp.dbg in
     mk (Clet(tmp_var,
              mk (Cop(Csubi,
                      [mk (Cop(Clsl,
@@ -394,19 +388,19 @@ let string_length exp =
 
 let lookup_tag obj tag =
   bind "tag" tag (fun tag ->
-    let mk = mkexpr_dbg obj.cmm_dbg in
+    let mk = mkdbg obj.dbg in
     mk (Cop(Cextcall("caml_get_public_method", typ_addr, false), [obj; tag])))
 
 let lookup_label obj lab =
   bind "lab" lab (fun lab ->
-    let mk = mkexpr_dbg obj.cmm_dbg in
+    let mk = mkdbg obj.dbg in
     let table = mk (Cop (Cload Word, [obj])) in
     addr_array_ref table lab)
 
 let call_cached_method obj tag cache pos args dbg =
   let arity = List.length args in
   let cache = array_indexing log2_size_addr cache pos in
-  let mk = mkexpr_dbg obj.cmm_dbg in
+  let mk = mkdbg obj.dbg in
   Compilenv.need_send_fun arity;
   mk (Cop(Capply (typ_addr),
           mk (Cconst_symbol("caml_send" ^ string_of_int arity)) ::
@@ -415,7 +409,7 @@ let call_cached_method obj tag cache pos args dbg =
 (* Allocation *)
 
 let make_alloc_generic set_fn tag wordsize args dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   if wordsize <= Config.max_young_wosize then
     mk (Cop(Calloc, mk (Cconst_natint(block_header tag wordsize)) :: args))
   else begin
@@ -449,7 +443,7 @@ type rhs_kind =
   | RHS_block of int
   | RHS_nonrec
 ;;
-let rec expr_size ulam = match ulam.ul_desc with
+let rec expr_size ulam = match ulam.exp with
   | Uclosure(fundecls, clos_vars) ->
       RHS_block (fundecls_size fundecls + List.length clos_vars)
   | Ulet(id, exp, body) ->
@@ -500,18 +494,18 @@ let new_const_symbol () =
 let structured_constants = ref ([] : (string * structured_constant) list)
 *)
 
-let transl_constant = function
+let transl_constant dbg = function
     Const_base(Const_int n) ->
-      int_const Debuginfo.none n
+      int_const dbg n
   | Const_base(Const_char c) ->
-      mkexpr (Cconst_int (((Char.code c) lsl 1) + 1))
+      mkdbg dbg (Cconst_int (((Char.code c) lsl 1) + 1))
   | Const_pointer n ->
       if n <= max_repr_int && n >= min_repr_int
-      then mkexpr (Cconst_pointer((n lsl 1) + 1))
-      else mkexpr (Cconst_natpointer
-                     (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n))
+      then mkdbg dbg (Cconst_pointer((n lsl 1) + 1))
+      else mkdbg dbg (Cconst_natpointer
+                        (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n))
   | cst ->
-    mkexpr (Cconst_symbol (Compilenv.new_structured_constant cst false))
+      mkdbg dbg (Cconst_symbol (Compilenv.new_structured_constant cst false))
 
 (* Translate constant closures *)
 
@@ -539,12 +533,12 @@ let alloc_header_boxed_int bi =
   | Pint64 -> alloc_boxedint64_header
 
 let box_int bi arg =
-  let mk = mkexpr_dbg arg.cmm_dbg in
-  match arg.cmm_desc with
+  let mk = mkdbg arg.dbg in
+  match arg.exp with
     Cconst_int n ->
-      transl_constant (box_int_constant bi (Nativeint.of_int n))
+      transl_constant arg.dbg (box_int_constant bi (Nativeint.of_int n))
   | Cconst_natint n ->
-      transl_constant (box_int_constant bi n)
+      transl_constant arg.dbg (box_int_constant bi n)
   | _ ->
       let arg' =
         if bi = Pint32 && size_int = 8 && big_endian
@@ -555,9 +549,9 @@ let box_int bi arg =
                        arg']))
 
 let rec unbox_int bi arg =
-  let mk = mkexpr_dbg arg.cmm_dbg in
-  match arg.cmm_desc with
-    Cop(Calloc, [hdr; ops; {cmm_desc=Cop(Clsl, [contents; {cmm_desc=Cconst_int 32}])}])
+  let mk = mkdbg arg.dbg in
+  match arg.exp with
+    Cop(Calloc, [hdr; ops; {exp=Cop(Clsl, [contents; {exp=Cconst_int 32}])}])
     when bi = Pint32 && size_int = 8 && big_endian ->
       (* Force sign-extension of low 32 bits *)
       mk (Cop(Casr, [mk (Cop(Clsl, [contents; mk(Cconst_int 32)])); mk (Cconst_int 32)]))
@@ -579,7 +573,7 @@ let rec unbox_int bi arg =
               [mk (Cop(Cadda, [arg; mk (Cconst_int size_addr)]))]))
 
 let make_unsigned_int bi arg =
-  let mk = mkexpr_dbg arg.cmm_dbg in  
+  let mk = mkdbg arg.dbg in  
   if bi = Pint32 && size_int = 8
   then mk (Cop(Cand, [arg; mk (Cconst_natint 0xFFFFFFFFn)]))
   else arg
@@ -602,7 +596,7 @@ let bigarray_elt_size = function
   | Pbigarray_complex64 -> 16
 
 let bigarray_indexing unsafe elt_kind layout b args dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   let check_bound a1 a2 k =
     if unsafe then k else
       mk (Csequence(mk(Cop(Ccheckbound, [a1;a2])), k)) in
@@ -651,7 +645,7 @@ let bigarray_word_kind = function
   | Pbigarray_complex64 -> Double
 
 let bigarray_get unsafe elt_kind layout b args dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   bind "ba" b (fun b ->
     match elt_kind with
       Pbigarray_complex32 | Pbigarray_complex64 ->
@@ -666,7 +660,7 @@ let bigarray_get unsafe elt_kind layout b args dbg =
                 [bigarray_indexing unsafe elt_kind layout b args dbg])))
 
 let bigarray_set unsafe elt_kind layout b args newval dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   bind "ba" b (fun b ->
     match elt_kind with
       Pbigarray_complex32 | Pbigarray_complex64 ->
@@ -741,7 +735,7 @@ let simplif_primitive p =
 (* constants first *)
 
 let transl_isout h arg =
-  let mk = mkexpr_dbg arg.cmm_dbg in
+  let mk = mkdbg arg.dbg in
   tag_int (mk(Cop(Ccmpa Clt, [h ; arg])))
 
 exception Found of int
@@ -757,7 +751,7 @@ let make_switch_gen arg cases acts =
     new_cases.(i) <- new_act
   done ;
 
-  let mk = mkexpr_dbg arg.cmm_dbg in
+  let mk = mkdbg arg.dbg in
   mk(Cswitch
     (arg, new_cases,
      Array.map
@@ -780,12 +774,12 @@ struct
 
   type act = expression
 
-  let default = mkexpr(Cexit (0,[]))
-  let make_prim p args = mkexpr(Cop (p,args))
+  let default = mk(Cexit (0,[]))
+  let make_prim p args = mk(Cop (p,args))
   let make_offset arg n = add_const arg n
-  let make_isout h arg =  mkexpr_dbg arg.cmm_dbg (Cop (Ccmpa Clt, [h ; arg]))
-  let make_isin h arg =  mkexpr_dbg arg.cmm_dbg (Cop (Ccmpa Cge, [h ; arg]))
-  let make_if cond ifso ifnot = mkexpr_dbg cond.cmm_dbg (Cifthenelse (cond, ifso, ifnot))
+  let make_isout h arg =  mkdbg arg.dbg (Cop (Ccmpa Clt, [h ; arg]))
+  let make_isin h arg =  mkdbg arg.dbg (Cop (Ccmpa Cge, [h ; arg]))
+  let make_if cond ifso ifnot = mkdbg cond.dbg (Cifthenelse (cond, ifso, ifnot))
   let make_switch arg cases actions =
     make_switch_gen arg cases actions
   let bind arg body = bind "switcher" arg body
@@ -802,7 +796,7 @@ type unboxed_number_kind =
   | Boxed_float
   | Boxed_integer of boxed_integer
 
-let is_unboxed_number ulam = match ulam.ul_desc with
+let is_unboxed_number ulam = match ulam.exp with
     Uconst(Const_base(Const_float f), _) ->
       Boxed_float
   | Uprim(p, _) ->
@@ -845,8 +839,8 @@ let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
   let need_boxed = ref false in
   let assigned = ref false in
   let rec subst c =
-    let mk = mkexpr_dbg c.cmm_dbg in
-    match c.cmm_desc with
+    let mk = mkdbg c.dbg in
+    match c.exp with
       Cvar id ->
         if Ident.same id boxed_id then need_boxed := true; c
     | Clet(id, arg, body) -> mk(Clet(id, subst arg, subst body))
@@ -857,9 +851,9 @@ let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
         end else
           mk(Cassign(id, subst arg))
     | Ctuple argv -> mk(Ctuple(List.map subst argv))
-    | Cop(Cload _, [{cmm_desc=Cvar id}]) ->
+    | Cop(Cload _, [{exp=Cvar id}]) ->
         if Ident.same id boxed_id then mk(Cvar unboxed_id) else c
-    | Cop(Cload _, [{cmm_desc=Cop(Cadda, [{cmm_desc=Cvar id}; _])}]) ->
+    | Cop(Cload _, [{exp=Cop(Cadda, [{exp=Cvar id}; _])}]) ->
         if Ident.same id boxed_id then mk(Cvar unboxed_id) else c
     | Cop(op, argv) -> mk(Cop(op, List.map subst argv))
     | Csequence(e1, e2) -> mk(Csequence(subst e1, subst e2))
@@ -879,21 +873,21 @@ let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
 let functions = (Queue.create() : (string * Ident.t list * ulambda) Queue.t)
 
 let rec transl ulam =
-  let mk = mkexpr_dbg ulam.ul_dbg in
-  match ulam.ul_desc with
+  let mk = mkdbg ulam.dbg in
+  match ulam.exp with
     Uvar id ->
       mk(Cvar id)
   | Uconst (sc, Some const_label) ->
       mk(Cconst_symbol const_label)
   | Uconst (sc, None) ->
-      transl_constant sc
+      transl_constant ulam.dbg sc
   | Uclosure(fundecls, []) ->
       let lbl = Compilenv.new_const_symbol() in
       constant_closures := (lbl, fundecls) :: !constant_closures;
       List.iter
         (fun f -> Queue.add (f.uf_label, f.uf_params, f.uf_body) functions)
         fundecls;
-      let mk = mkexpr_dbg (List.hd fundecls).uf_dbg in
+      let mk = mkdbg (List.hd fundecls).uf_dbg in
       mk(Cconst_symbol lbl)
   | Uclosure(fundecls, clos_vars) ->
       let block_size =
@@ -903,7 +897,7 @@ let rec transl ulam =
             List.map transl clos_vars
         | f :: rem ->
             Queue.add (f.uf_label, f.uf_params, f.uf_body) functions;
-            let mk = mkexpr_dbg f.uf_dbg in
+            let mk = mkdbg f.uf_dbg in
             let header =
               if pos = 0
               then mk(alloc_closure_header block_size)
@@ -948,7 +942,7 @@ let rec transl ulam =
             bind "met" (lookup_label obj (transl met)) (call_met obj args)
         | Cached, cache :: pos :: args ->
             call_cached_method obj (transl met) (transl cache) (transl pos)
-              (List.map transl args) ulam.ul_dbg
+              (List.map transl args) ulam.dbg
         | _ ->
             bind "met" (lookup_tag obj (transl met)) (call_met obj args))
   | Ulet(id, exp, body) ->
@@ -971,9 +965,9 @@ let rec transl ulam =
         (Pgetglobal id, []) ->
           mk(Cconst_symbol (Ident.name id))
       | (Pmakeblock(tag, mut), []) ->
-          transl_constant(Const_block(tag, []))
+          transl_constant ulam.dbg (Const_block(tag, []))
       | (Pmakeblock(tag, mut), args) ->
-          make_alloc tag (List.map transl args) ulam.ul_dbg
+          make_alloc tag (List.map transl args) ulam.dbg
       | (Pccall prim, args) ->
           if prim.prim_native_float then
             box_float
@@ -983,22 +977,22 @@ let rec transl ulam =
             mk(Cop(Cextcall(Primitive.native_name prim, typ_addr, prim.prim_alloc),
                    List.map transl args))
       | (Pmakearray kind, []) ->
-          transl_constant(Const_block(0, []))
+          transl_constant ulam.dbg (Const_block(0, []))
       | (Pmakearray kind, args) ->
           begin match kind with
             Pgenarray ->
               mk(Cop(Cextcall("caml_make_array", typ_addr, true),
-                     [make_alloc 0 (List.map transl args) ulam.ul_dbg]))
+                     [make_alloc 0 (List.map transl args) ulam.dbg]))
           | Paddrarray | Pintarray ->
-              make_alloc 0 (List.map transl args) ulam.ul_dbg
+              make_alloc 0 (List.map transl args) ulam.dbg
           | Pfloatarray ->
               make_float_alloc Obj.double_array_tag
-                (List.map transl_unbox_float args) ulam.ul_dbg
+                (List.map transl_unbox_float args) ulam.dbg
           end
       | (Pbigarrayref(unsafe, num_dims, elt_kind, layout), arg1 :: argl) ->
           let elt =
             bigarray_get unsafe elt_kind layout
-              (transl arg1) (List.map transl argl) ulam.ul_dbg in
+              (transl arg1) (List.map transl argl) ulam.dbg in
           begin match elt_kind with
             Pbigarray_float32 | Pbigarray_float64 -> box_float elt
           | Pbigarray_complex32 | Pbigarray_complex64 -> elt
@@ -1021,13 +1015,13 @@ let rec transl ulam =
             | Pbigarray_int64 -> transl_unbox_int Pint64 argnewval
             | Pbigarray_native_int -> transl_unbox_int Pnativeint argnewval
             | _ -> untag_int (transl argnewval))
-            ulam.ul_dbg)
+            ulam.dbg)
       | (p, [arg]) ->
-          transl_prim_1 p arg ulam.ul_dbg
+          transl_prim_1 p arg ulam.dbg
       | (p, [arg1; arg2]) ->
-          transl_prim_2 p arg1 arg2 ulam.ul_dbg
+          transl_prim_2 p arg1 arg2 ulam.dbg
       | (p, [arg1; arg2; arg3]) ->
-          transl_prim_3 p arg1 arg2 arg3 ulam.ul_dbg
+          transl_prim_3 p arg1 arg2 arg3 ulam.dbg
       | (_, _) ->
           fatal_error "Cmmgen.transl:prim"
       end
@@ -1060,25 +1054,25 @@ let rec transl ulam =
       mk(Ccatch(nfail, ids, transl body, transl handler))
   | Utrywith(body, exn, handler) ->
       mk(Ctrywith(transl body, exn, transl handler))
-  | Uifthenelse({ul_desc=Uprim(Pnot, [arg])}, ifso, ifnot) ->
-      transl (mkulambda_dbg ulam.ul_dbg (Uifthenelse(arg, ifnot, ifso)))
-  | Uifthenelse(cond, ifso, {ul_desc=Ustaticfail (nfail, [])}) ->
+  | Uifthenelse({exp=Uprim(Pnot, [arg])}, ifso, ifnot) ->
+      transl (mkdbg ulam.dbg (Uifthenelse(arg, ifnot, ifso)))
+  | Uifthenelse(cond, ifso, {exp=Ustaticfail (nfail, [])}) ->
       exit_if_false cond (transl ifso) nfail
-  | Uifthenelse(cond, {ul_desc=Ustaticfail (nfail, [])}, ifnot) ->
+  | Uifthenelse(cond, {exp=Ustaticfail (nfail, [])}, ifnot) ->
       exit_if_true cond nfail (transl ifnot)
-  | Uifthenelse({ul_desc=Uprim(Psequand, _)} as cond, ifso, ifnot) ->
+  | Uifthenelse({exp=Uprim(Psequand, _)} as cond, ifso, ifnot) ->
       let raise_num = next_raise_count () in
       make_catch
         raise_num
         (exit_if_false cond (transl ifso) raise_num)
         (transl ifnot)
-  | Uifthenelse({ul_desc=Uprim(Psequor, _)} as cond, ifso, ifnot) ->
+  | Uifthenelse({exp=Uprim(Psequor, _)} as cond, ifso, ifnot) ->
       let raise_num = next_raise_count () in
       make_catch
         raise_num
         (exit_if_true cond raise_num (transl ifnot))
         (transl ifso)
-  | Uifthenelse ({ul_desc=Uifthenelse (cond, condso, condnot)}, ifso, ifnot) ->
+  | Uifthenelse ({exp=Uifthenelse (cond, condso, condnot)}, ifso, ifnot) ->
       let num_true = next_raise_count () in
       make_catch
         num_true
@@ -1133,7 +1127,7 @@ let rec transl ulam =
       return_unit(mk(Cassign(id, transl exp)))
 
 and transl_prim_1 p arg dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   match p with
   (* Generic operations *)
     Pidentity ->
@@ -1159,7 +1153,7 @@ and transl_prim_1 p arg dbg =
       if no_overflow_lsl n then
         add_const (transl arg) (n lsl 1)
       else
-        transl_prim_2 Paddint arg (mkulambda_dbg dbg (Uconst (Const_base(Const_int n), None))) dbg
+        transl_prim_2 Paddint arg (mkdbg dbg (Uconst (Const_base(Const_int n), None))) dbg
   | Poffsetref n ->
       return_unit
         (bind "ref" (transl arg) (fun arg ->
@@ -1214,7 +1208,7 @@ and transl_prim_1 p arg dbg =
       fatal_error "Cmmgen.transl_prim_1"
 
 and transl_prim_2 p arg1 arg2 dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   match p with
   (* Heap operations *)
     Psetfield(n, ptr) ->
@@ -1395,7 +1389,7 @@ and transl_prim_2 p arg1 arg2 dbg =
       fatal_error "Cmmgen.transl_prim_2"
 
 and transl_prim_3 p arg1 arg2 arg3 dbg =
-  let mk = mkexpr_dbg dbg in
+  let mk = mkdbg dbg in
   match p with
   (* String operations *)
     Pstringsetu ->
@@ -1466,21 +1460,21 @@ and transl_prim_3 p arg1 arg2 arg3 dbg =
     fatal_error "Cmmgen.transl_prim_3"
 
 and transl_unbox_float ulam =
-  let mk = mkexpr_dbg ulam.ul_dbg in
-  match ulam.ul_desc with
+  let mk = mkdbg ulam.dbg in
+  match ulam.exp with
     Uconst(Const_base(Const_float f), _) -> mk(Cconst_float f)
   | _ -> unbox_float(transl ulam)
 
 and transl_unbox_int bi ulam =
-  let mk = mkexpr_dbg ulam.ul_dbg in
-  match ulam.ul_desc with
+  let mk = mkdbg ulam.dbg in
+  match ulam.exp with
     Uconst(Const_base(Const_int32 n), _) ->
       mk(Cconst_natint (Nativeint.of_int32 n))
   | Uconst(Const_base(Const_nativeint n), _) ->
       mk(Cconst_natint n)
   | Uconst(Const_base(Const_int64 n), _) ->
       assert (size_int = 8); mk(Cconst_natint (Int64.to_nativeint n))
-  | Uprim(Pbintofint bi', [{ul_desc=Uconst(Const_base(Const_int i),_)}]) when bi = bi' ->
+  | Uprim(Pbintofint bi', [{exp=Uconst(Const_base(Const_int i),_)}]) when bi = bi' ->
       mk(Cconst_int i)
   | _ -> unbox_int bi (transl ulam)
 
@@ -1489,7 +1483,7 @@ and transl_unbox_let box_fn unbox_fn transl_unbox_fn id exp body =
   let trbody1 = transl body in
   let (trbody2, need_boxed, is_assigned) =
     subst_boxed_number unbox_fn id unboxed_id trbody1 in
-  let mk = mkexpr_dbg exp.ul_dbg in
+  let mk = mkdbg exp.dbg in
   if need_boxed && is_assigned then
     mk(Clet(id, transl exp, trbody1))
   else
@@ -1499,14 +1493,14 @@ and transl_unbox_let box_fn unbox_fn transl_unbox_fn id exp body =
             else trbody2))
 
 and make_catch ncatch body handler =
-  let mk = mkexpr_dbg body.cmm_dbg in
-  match body.cmm_desc with
+  let mk = mkdbg body.dbg in
+  match body.exp with
   | Cexit (nexit,[]) when nexit=ncatch -> handler
   | _ ->  mk(Ccatch (ncatch, [], body, handler))
 
 and make_catch2 mk_body handler =
-  let mk = mkexpr_dbg handler.cmm_dbg in
-  match handler.cmm_desc with
+  let mk = mkdbg handler.dbg in
+  match handler.exp with
   | Cexit (_,[])|Ctuple []|Cconst_int _|Cconst_pointer _ -> mk_body handler
   | _ ->
     let nfail = next_raise_count () in
@@ -1516,14 +1510,14 @@ and make_catch2 mk_body handler =
       handler
 
 and exit_if_true cond nfail otherwise =
-  let mk = mkexpr_dbg cond.ul_dbg in
-  match cond.ul_desc with
+  let mk = mkdbg cond.dbg in
+  match cond.exp with
   | Uconst (Const_pointer 0, _) -> otherwise
   | Uconst (Const_pointer 1, _) -> mk(Cexit (nfail,[]))
   | Uprim(Psequor, [arg1; arg2]) ->
       exit_if_true arg1 nfail (exit_if_true arg2 nfail otherwise)
   | Uprim(Psequand, _) ->
-      begin match otherwise.cmm_desc with
+      begin match otherwise.exp with
       | Cexit (raise_num,[]) ->
           exit_if_false cond (mk(Cexit (nfail,[]))) raise_num
       | _ ->
@@ -1547,14 +1541,14 @@ and exit_if_true cond nfail otherwise =
       mk(Cifthenelse(test_bool(transl cond), mk(Cexit (nfail, [])), otherwise))
 
 and exit_if_false cond otherwise nfail =
-  let mk = mkexpr_dbg cond.ul_dbg in
-  match cond.ul_desc with
+  let mk = mkdbg cond.dbg in
+  match cond.exp with
   | Uconst (Const_pointer 0, _) -> mk(Cexit (nfail,[]))
   | Uconst (Const_pointer 1, _) -> otherwise
   | Uprim(Psequand, [arg1; arg2]) ->
       exit_if_false arg1 (exit_if_false arg2 otherwise nfail) nfail
   | Uprim(Psequor, _) ->
-      begin match otherwise.cmm_desc with
+      begin match otherwise.exp with
       | Cexit (raise_num,[]) ->
           exit_if_true cond raise_num (mk(Cexit (nfail,[])))
       | _ ->
@@ -1600,17 +1594,15 @@ and transl_switch arg index cases = match Array.length cases with
       end
     done ;
     inters := (0, !this_high, !this_act) :: !inters ;
-    let mk = mkexpr_dbg arg.cmm_dbg in
     bind "switcher" arg
       (fun a ->
         SwitcherBlocks.zyva
           (0,n_index-1)
-          (fun i -> mk(Cconst_int i))
+          (fun i -> mkdbg arg.dbg (Cconst_int i))
           a
           (Array.of_list !inters) actions)
 
 and transl_letrec bindings cont =
-  let mk = mkexpr in
   let bsz = List.map (fun (id, exp) -> (id, exp, expr_size exp)) bindings in
   let rec init_blocks = function
     | [] -> fill_nonrec bsz
@@ -1869,7 +1861,6 @@ CAMLprim value caml_cache_public_method (value meths, value tag, value *cache)
 *)
 
 let cache_public_method meths tag cache =
-  let mk = mkexpr in
   let raise_num = next_raise_count () in
   let li = Ident.create "li" and hi = Ident.create "hi"
   and mi = Ident.create "mi" and tagged = Ident.create "tagged" in
@@ -1920,7 +1911,6 @@ let apply_function_body arity =
   let arg = Array.create arity (Ident.create "arg") in
   for i = 1 to arity - 1 do arg.(i) <- Ident.create "arg" done;
   let clos = Ident.create "clos" in
-  let mk = mkexpr in
   let rec app_fun clos n =
     if n = arity-1 then
       mk(Cop(Capply typ_addr,
@@ -1947,7 +1937,6 @@ let send_function arity =
   let cache = Ident.create "cache"
   and obj = List.hd args
   and tag = Ident.create "tag" in
-  let mk = mkexpr in
   let clos =
     let cache = mk(Cvar cache)
     and obj = mk(Cvar obj)
@@ -1999,7 +1988,6 @@ let apply_function arity =
 let tuplify_function arity =
   let arg = Ident.create "arg" in
   let clos = Ident.create "clos" in
-  let mk = mkexpr in
   let rec access_components i =
     if i >= arity
     then []
@@ -2037,7 +2025,6 @@ let tuplify_function arity =
 let final_curry_function arity =
   let last_arg = Ident.create "arg" in
   let last_clos = Ident.create "clos" in
-  let mk = mkexpr in
   let rec curry_fun args clos n =
     if n = 0 then
       mk(Cop(Capply typ_addr,
@@ -2071,7 +2058,6 @@ let rec intermediate_curry_functions arity num =
     let name1 = "caml_curry" ^ string_of_int arity in
     let name2 = if num = 0 then name1 else name1 ^ "_" ^ string_of_int num in
     let arg = Ident.create "arg" and clos = Ident.create "clos" in
-    let mk = mkexpr in
     Cfunction
      {fun_name = name2;
       fun_args = [arg, typ_addr; clos, typ_addr];
@@ -2154,7 +2140,6 @@ let generic_functions shared units =
 (* Generate the entry point *)
 
 let entry_point namelist =
-  let mk = mkexpr in
   let incr_global_inited =
     mk(Cop(Cstore Word,
            [mk(Cconst_symbol "caml_globals_inited");

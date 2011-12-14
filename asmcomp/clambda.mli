@@ -49,10 +49,7 @@ and ufun = {
   uf_body   : ulambda;
 }
 
-and ulambda = {
-  ul_dbg  : Debuginfo.t;
-  ul_desc : ulambda_desc;
-}
+and ulambda = ulambda_desc Debuginfo.expression
 
 and ulambda_switch =
   { us_index_consts: int array;
@@ -67,11 +64,6 @@ type function_description =
     fun_arity: int;                     (* Number of arguments *)
     mutable fun_closed: bool;           (* True if environment not used *)
     mutable fun_inline: (Ident.t list * ulambda) option }
-
-(* Constructors *)
-
-val mkulambda : ulambda_desc -> ulambda
-val mkulambda_dbg : Debuginfo.t -> ulambda_desc -> ulambda
 
 (* Approximation of values *)
 

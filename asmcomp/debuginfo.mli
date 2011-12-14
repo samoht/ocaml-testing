@@ -24,19 +24,29 @@ type t = {
   dinfo_char_end: int
 }
 
+type 'a expression = {
+  exp: 'a;
+  dbg: t;
+}
+
 val none: t
 
-(* XXX Sometimes, physical and structural equality is not preserved (???),
-   so it's better to use this function instead of [(==)none] *)
+(** Build an expression with no debuging information (ie. with the
+    value [none]) *)
+val mk: 'a -> 'a expression
+
+val mkdbg: t -> 'a -> 'a expression
+
+(** Marshalled and unmarshalled [none] value will not be physically
+    equal, so it is safer to use [is_none] instead of [(==)]. *)
 val is_none : t -> bool
 
-val to_string: t -> string
-val check: t -> unit
+val string_of_dbg: t -> string
 
-val from_location: kind -> Location.t -> t
+val dbg_of_location: kind -> Location.t -> t
 
-val from_call : Lambda.lambda_event -> t
-val from_raise: Lambda.lambda_event -> t
-val from_event: Lambda.lambda_event -> t
+val dbg_of_call : Lambda.lambda_event -> t
+val dbg_of_raise: Lambda.lambda_event -> t
+val dbg_of_event: Lambda.lambda_event -> t
 
-val needs_frame: t -> bool
+val needs_slot_in_frame: t -> bool

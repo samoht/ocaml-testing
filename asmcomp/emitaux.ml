@@ -147,13 +147,13 @@ let emit_frames a =
       lbl in
   let emit_frame fd =
     a.efa_label fd.fd_lbl;
-    a.efa_16 (if Debuginfo.needs_frame fd.fd_debuginfo
+    a.efa_16 (if Debuginfo.needs_slot_in_frame fd.fd_debuginfo
               then fd.fd_frame_size + 1
               else fd.fd_frame_size);
     a.efa_16 (List.length fd.fd_live_offset);
     List.iter a.efa_16 fd.fd_live_offset;
     a.efa_align Arch.size_addr;
-    if Debuginfo.needs_frame fd.fd_debuginfo then begin
+    if Debuginfo.needs_slot_in_frame fd.fd_debuginfo then begin
       let d = fd.fd_debuginfo in
       let line = min 0xFFFFF d.dinfo_line
       and char_start = min 0xFF d.dinfo_char_start

@@ -92,14 +92,7 @@ type expression_desc =
   | Cexit of int * expression list
   | Ctrywith of expression * Ident.t * expression
 
-and expression = {
-  cmm_desc : expression_desc;
-  cmm_dbg  : Debuginfo.t;
-}
-
-val mkexpr: expression_desc -> expression
-
-val mkexpr_dbg: Debuginfo.t -> expression_desc -> expression
+and expression = expression_desc Debuginfo.expression
 
 type fundecl =
   { fun_name: string;

@@ -24,7 +24,7 @@ let label ppf l =
 
 let instr ppf i =
   if not (Debuginfo.is_none i.dbg) then
-    fprintf ppf "==%s==@," (Debuginfo.to_string i.dbg);
+    fprintf ppf "==%s==@," (Debuginfo.string_of_dbg i.dbg);
   match i.desc with
   | Lend -> ()
   | Lop op ->

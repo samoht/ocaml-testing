@@ -16,6 +16,7 @@
 
 open Format
 open Cmm
+open Debuginfo
 
 let machtype_component ppf = function
   | Addr -> fprintf ppf "addr"
@@ -94,10 +95,10 @@ let rec expr_desc ppf = function
   | Cconst_pointer n -> fprintf ppf "%ia" n
   | Cconst_natpointer n -> fprintf ppf "%sa" (Nativeint.to_string n)
   | Cvar id -> Ident.print ppf id
-  | Clet(id, def, ({cmm_desc=Clet(_, _, _)} as body)) ->
+  | Clet(id, def, ({exp=Clet(_, _, _)} as body)) ->
       let print_binding id ppf def =
         fprintf ppf "@[<2>%a@ %a@]" Ident.print id expression def in
-      let rec in_part ppf cmm = match cmm.cmm_desc with
+      let rec in_part ppf cmm = match cmm.exp with
         | Clet(id, def, body) ->
             fprintf ppf "@ %a" (print_binding id) def;
             in_part ppf body
@@ -162,15 +163,15 @@ let rec expr_desc ppf = function
       fprintf ppf "@[<2>(try@ %a@;<1 -2>with@ %a@ %a)@]"
              sequence e1 Ident.print id sequence e2
 
-and sequence ppf cmm = match cmm.cmm_desc with
+and sequence ppf cmm = match cmm.exp with
   | Csequence(e1, e2) -> fprintf ppf "%a@ %a" sequence e1 sequence e2
   | _ -> expression ppf cmm
 
 and expression ppf e =
-  if Debuginfo.is_none e.cmm_dbg then
-    fprintf ppf "%a" expr_desc e.cmm_desc
+  if is_none e.dbg then
+    fprintf ppf "%a" expr_desc e.exp
   else
-    fprintf ppf "%s:%a" (Debuginfo.to_string e.cmm_dbg) expr_desc e.cmm_desc
+    fprintf ppf "%s:%a" (string_of_dbg e.dbg) expr_desc e.exp
 
 let fundecl ppf f =
   let print_cases ppf cases =

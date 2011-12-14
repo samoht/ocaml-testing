@@ -49,21 +49,13 @@ and ufun = {
   uf_body   : ulambda;
 }
 
-and ulambda = {
-  ul_dbg  : Debuginfo.t;
-  ul_desc : ulambda_desc;
-}
+and ulambda = ulambda_desc Debuginfo.expression
 
 and ulambda_switch =
   { us_index_consts: int array;
     us_actions_consts : ulambda array;
     us_index_blocks: int array;
     us_actions_blocks: ulambda array}
-
-let mkulambda_dbg ul_dbg ul_desc =
-  { ul_dbg; ul_desc }
-
-let mkulambda = mkulambda_dbg Debuginfo.none
 
 (* Description of known functions *)
 

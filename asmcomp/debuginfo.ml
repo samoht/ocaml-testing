@@ -27,6 +27,11 @@ type t = {
   dinfo_char_end: int
 }
 
+type 'a expression = {
+  exp: 'a;
+  dbg: t;
+}
+
 let none = {
   dinfo_kind = Dinfo_none;
   dinfo_file = "";
@@ -35,10 +40,13 @@ let none = {
   dinfo_char_end = 0
 }
 
-let is_none d =
-  d.dinfo_kind = Dinfo_none
+let mkdbg dbg exp = {exp; dbg}
+let mk exp = mkdbg none exp
 
-let to_string d =
+let is_none d =
+  d.dinfo_kind <> Dinfo_none
+
+let string_of_dbg d =
   if d = none
   then ""
   else
@@ -50,16 +58,7 @@ let to_string d =
     Printf.sprintf "{%s:%d,%d-%d|%s}"
            d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end k
 
-let check d =
-  let env =
-    try ignore (Sys.getenv "DBGTEST"); true
-    with _ -> false in
-  if env && d = none && d != none then begin
-    Printexc.print_backtrace stderr;
-    assert false
-  end
-
-let from_location kind loc =
+let dbg_of_location kind loc =
   if loc == Location.none then
     none
   else
@@ -73,13 +72,13 @@ let from_location kind loc =
       else loc.loc_start.pos_cnum - loc.loc_start.pos_bol }
 
 let from kind ev =
-  from_location kind ev.Lambda.lev_loc
+  dbg_of_location kind ev.Lambda.lev_loc
 
-let from_call  = from Dinfo_call 
-let from_raise = from Dinfo_raise
-let from_event = from Dinfo_event
+let dbg_of_call  = from Dinfo_call 
+let dbg_of_raise = from Dinfo_raise
+let dbg_of_event = from Dinfo_event
 
-let needs_frame ev = match ev.dinfo_kind with
+let needs_slot_in_frame ev = match ev.dinfo_kind with
   | Dinfo_none 
   | Dinfo_event -> false
   | Dinfo_raise

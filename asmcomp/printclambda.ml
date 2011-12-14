@@ -14,6 +14,7 @@
 open Format
 open Asttypes
 open Clambda
+open Debuginfo
 
 let rec pr_idents ppf = function
   | [] -> ()
@@ -37,8 +38,8 @@ let rec lam_desc ppf = function
         List.iter (fprintf ppf "@ %a" Ident.print)in
       let one_fun ppf f =
         fprintf ppf "(";
-        if not (Debuginfo.is_none f.uf_dbg) then
-          fprintf ppf "%s@ " (Debuginfo.to_string f.uf_dbg);
+        if not (is_none f.uf_dbg) then
+          fprintf ppf "%s@ " (string_of_dbg f.uf_dbg);
         fprintf ppf "fun@ %s@ %d @[<2>%a@] @[<2>%a@])"
           f.uf_label f.uf_arity idents f.uf_params lam f.uf_body in
       let funs ppf =
@@ -48,7 +49,7 @@ let rec lam_desc ppf = function
       fprintf ppf "@[<2>(closure@ %a %a)@]" funs clos lams fv
   | Uoffset(l,i) -> fprintf ppf "@[<2>(offset %a %d)@]" lam l i
   | Ulet(id, arg, body) ->
-      let rec letbody ul = match ul.ul_desc with
+      let rec letbody ul = match ul.exp with
         | Ulet(id, arg, body) ->
             fprintf ppf "@ @[<2>%a@ %a@]" Ident.print id lam arg;
             letbody body
@@ -126,18 +127,18 @@ let rec lam_desc ppf = function
         if k = Lambda.Self then "self" else if k = Lambda.Cached then "cache" else "" in
       fprintf ppf "@[<2>(send%s@ %a@ %a%a)@]" kind lam obj lam met args largs
 
-and sequence ppf ulam = match ulam.ul_desc with
+and sequence ppf ulam = match ulam.exp with
   | Usequence(l1, l2) ->
       fprintf ppf "%a@ %a" sequence l1 sequence l2
   | _ ->
       lam ppf ulam
 
 and lam ppf ulam =
-  if Debuginfo.is_none ulam.ul_dbg then
-    lam_desc ppf ulam.ul_desc
+  if is_none ulam.dbg then
+    lam_desc ppf ulam.exp
   else
     fprintf ppf "@[<2>(%s %a)@]"
-      (Debuginfo.to_string ulam.ul_dbg)
-      lam_desc ulam.ul_desc
+      (string_of_dbg ulam.dbg)
+      lam_desc ulam.exp
 
 let clambda = lam

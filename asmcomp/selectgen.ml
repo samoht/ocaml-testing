@@ -19,6 +19,7 @@ open Misc
 open Cmm
 open Reg
 open Mach
+open Debuginfo
 
 type environment = (Ident.t, Reg.t array) Tbl.t
 
@@ -48,7 +49,7 @@ let oper_result_type = function
 (* Infer the size in bytes of the result of a simple expression *)
 
 let size_expr env exp =
-  let rec size localenv c = match c.cmm_desc with
+  let rec size localenv c = match c.exp with
       Cconst_int _ | Cconst_natint _ -> Arch.size_int
     | Cconst_symbol _ | Cconst_pointer _ | Cconst_natpointer _ ->
         Arch.size_addr
@@ -169,7 +170,7 @@ class virtual selector_generic = object (self)
    first, then the block is allocated, then the simple arguments are
    evaluated and stored. *)
 
-method is_simple_expr c = match c.cmm_desc with
+method is_simple_expr c = match c.exp with
     Cconst_int _ -> true
   | Cconst_natint _ -> true
   | Cconst_float _ -> true
@@ -208,7 +209,7 @@ method select_store addr arg =
 
 method select_operation op args =
   match (op, args) with
-    (Capply ty, {cmm_desc=Cconst_symbol s} :: rem) -> (Icall_imm s, rem)
+    (Capply ty, {exp=Cconst_symbol s} :: rem) -> (Icall_imm s, rem)
   | (Capply ty, _) -> (Icall_ind, args)
   | (Cextcall(s, ty, alloc), _) -> (Iextcall(s, alloc), args)
   | (Cload chunk, [arg]) ->
@@ -226,12 +227,12 @@ method select_operation op args =
   | (Calloc, _) -> (Ialloc 0, args)
   | (Caddi, _) -> self#select_arith_comm Iadd args
   | (Csubi, _) -> self#select_arith Isub args
-  | (Cmuli, [arg1; {cmm_desc=Cconst_int n}]) ->
+  | (Cmuli, [arg1; {exp=Cconst_int n}]) ->
       let l = Misc.log2 n in
       if n = 1 lsl l
       then (Iintop_imm(Ilsl, l), [arg1])
       else self#select_arith_comm Imul args
-  | (Cmuli, [{cmm_desc=Cconst_int n}; arg1]) ->
+  | (Cmuli, [{exp=Cconst_int n}; arg1]) ->
       let l = Misc.log2 n in
       if n = 1 lsl l
       then (Iintop_imm(Ilsl, l), [arg1])
@@ -261,39 +262,39 @@ method select_operation op args =
   | _ -> fatal_error "Selection.select_oper"
 
 method private select_arith_comm op = function
-    [arg; {cmm_desc=Cconst_int n}] when self#is_immediate n ->
+    [arg; {exp=Cconst_int n}] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
-  | [arg; {cmm_desc=Cconst_pointer n}] when self#is_immediate n ->
+  | [arg; {exp=Cconst_pointer n}] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
-  | [{cmm_desc=Cconst_int n}; arg] when self#is_immediate n ->
+  | [{exp=Cconst_int n}; arg] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
-  | [{cmm_desc=Cconst_pointer n}; arg] when self#is_immediate n ->
+  | [{exp=Cconst_pointer n}; arg] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
   | args ->
       (Iintop op, args)
 
 method private select_arith op = function
-    [arg; {cmm_desc=Cconst_int n}] when self#is_immediate n ->
+    [arg; {exp=Cconst_int n}] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
-  | [arg; {cmm_desc=Cconst_pointer n}] when self#is_immediate n ->
+  | [arg; {exp=Cconst_pointer n}] when self#is_immediate n ->
       (Iintop_imm(op, n), [arg])
   | args ->
       (Iintop op, args)
 
 method private select_shift op = function
-    [arg; {cmm_desc=Cconst_int n}] when n >= 0 && n < Arch.size_int * 8 ->
+    [arg; {exp=Cconst_int n}] when n >= 0 && n < Arch.size_int * 8 ->
       (Iintop_imm(op, n), [arg])
   | args ->
       (Iintop op, args)
 
 method private select_arith_comp cmp = function
-    [arg; {cmm_desc=Cconst_int n}] when self#is_immediate n ->
+    [arg; {exp=Cconst_int n}] when self#is_immediate n ->
       (Iintop_imm(Icomp cmp, n), [arg])
-  | [arg; {cmm_desc=Cconst_pointer n}] when self#is_immediate n ->
+  | [arg; {exp=Cconst_pointer n}] when self#is_immediate n ->
       (Iintop_imm(Icomp cmp, n), [arg])
-  | [{cmm_desc=Cconst_int n}; arg] when self#is_immediate n ->
+  | [{exp=Cconst_int n}; arg] when self#is_immediate n ->
       (Iintop_imm(Icomp(swap_intcomp cmp), n), [arg])
-  | [{cmm_desc=Cconst_pointer n}; arg] when self#is_immediate n ->
+  | [{exp=Cconst_pointer n}; arg] when self#is_immediate n ->
       (Iintop_imm(Icomp(swap_intcomp cmp), n), [arg])
   | args ->
       (Iintop(Icomp cmp), args)
@@ -301,31 +302,31 @@ method private select_arith_comp cmp = function
 (* Instruction selection for conditionals *)
 
 method select_condition c =
-  let mk = mkexpr_dbg c.cmm_dbg in
-  match c.cmm_desc with
-    Cop(Ccmpi cmp, [arg1; {cmm_desc=Cconst_int n}]) when self#is_immediate n ->
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cop(Ccmpi cmp, [arg1; {exp=Cconst_int n}]) when self#is_immediate n ->
       (Iinttest_imm(Isigned cmp, n), arg1)
-  | Cop(Ccmpi cmp, [{cmm_desc=Cconst_int n}; arg2]) when self#is_immediate n ->
+  | Cop(Ccmpi cmp, [{exp=Cconst_int n}; arg2]) when self#is_immediate n ->
       (Iinttest_imm(Isigned(swap_comparison cmp), n), arg2)
-  | Cop(Ccmpi cmp, [arg1; {cmm_desc=Cconst_pointer n}]) when self#is_immediate n ->
+  | Cop(Ccmpi cmp, [arg1; {exp=Cconst_pointer n}]) when self#is_immediate n ->
       (Iinttest_imm(Isigned cmp, n), arg1)
-  | Cop(Ccmpi cmp, [{cmm_desc=Cconst_pointer n}; arg2]) when self#is_immediate n ->
+  | Cop(Ccmpi cmp, [{exp=Cconst_pointer n}; arg2]) when self#is_immediate n ->
       (Iinttest_imm(Isigned(swap_comparison cmp), n), arg2)
   | Cop(Ccmpi cmp, args) ->
       (Iinttest(Isigned cmp), mk(Ctuple args))
-  | Cop(Ccmpa cmp, [arg1; {cmm_desc=Cconst_pointer n}]) when self#is_immediate n ->
+  | Cop(Ccmpa cmp, [arg1; {exp=Cconst_pointer n}]) when self#is_immediate n ->
       (Iinttest_imm(Iunsigned cmp, n), arg1)
-  | Cop(Ccmpa cmp, [arg1; {cmm_desc=Cconst_int n}]) when self#is_immediate n ->
+  | Cop(Ccmpa cmp, [arg1; {exp=Cconst_int n}]) when self#is_immediate n ->
       (Iinttest_imm(Iunsigned cmp, n), arg1)
-  | Cop(Ccmpa cmp, [{cmm_desc=Cconst_pointer n}; arg2]) when self#is_immediate n ->
+  | Cop(Ccmpa cmp, [{exp=Cconst_pointer n}; arg2]) when self#is_immediate n ->
       (Iinttest_imm(Iunsigned(swap_comparison cmp), n), arg2)
-  | Cop(Ccmpa cmp, [{cmm_desc=Cconst_int n}; arg2]) when self#is_immediate n ->
+  | Cop(Ccmpa cmp, [{exp=Cconst_int n}; arg2]) when self#is_immediate n ->
       (Iinttest_imm(Iunsigned(swap_comparison cmp), n), arg2)
   | Cop(Ccmpa cmp, args) ->
       (Iinttest(Iunsigned cmp), mk(Ctuple args))
   | Cop(Ccmpf cmp, args) ->
       (Ifloattest(cmp, false), mk(Ctuple args))
-  | Cop(Cand, [arg; {cmm_desc=Cconst_int 1}]) ->
+  | Cop(Cand, [arg; {exp=Cconst_int 1}]) ->
       (Ioddtest, arg)
   | _ ->
       (Itruetest, c)
@@ -388,9 +389,9 @@ method insert_op_debug op dbg rs rd =
    at the end of the self sequence *)
 
 method emit_expr env exp =
-  let dbg = exp.cmm_dbg in
-  let mk = mkexpr_dbg dbg in
-  match exp.cmm_desc with
+  let dbg = exp.dbg in
+  let mk = mkdbg exp.dbg in
+  match exp.exp with
     Cconst_int n ->
       let r = self#regs_for typ_int in
       Some(self#insert_op_debug (Iconst_int(Nativeint.of_int n)) dbg [||] r)
@@ -593,7 +594,7 @@ method private bind_let env v r1 =
   end
 
 method private emit_parts env exp =
-  let mk = mkexpr_dbg exp.cmm_dbg in
+  let mk = mkdbg exp.dbg in
   if self#is_simple_expr exp then
     Some (exp, env)
   else begin
@@ -611,7 +612,7 @@ method private emit_parts env exp =
           else begin
             (* Introduce a fresh temp to hold the result *)
             let tmp = Reg.createv_like r in
-            self#insert_moves exp.cmm_dbg r tmp;
+            self#insert_moves exp.dbg r tmp;
             Some (mk(Cvar id), Tbl.add id tmp env)
           end
         end
@@ -657,7 +658,7 @@ method emit_stores env data regs_addr =
       match self#emit_expr env arg with
         None -> assert false
       | Some regs ->
-          let dbg = arg.cmm_dbg in
+          let dbg = arg.dbg in
           match op with
             Istore(_, _) ->
               for i = 0 to Array.length regs - 1 do
@@ -679,13 +680,13 @@ method private emit_return env exp =
     None -> ()
   | Some r ->
       let loc = Proc.loc_results r in
-      let dbg = exp.cmm_dbg in
+      let dbg = exp.dbg in
       self#insert_moves dbg r loc;
       self#insert_debug Ireturn dbg loc [||]
 
 method emit_tail env exp =
-  let dbg = exp.cmm_dbg in
-  match exp.cmm_desc with
+  let dbg = exp.dbg in
+  match exp.exp with
     Clet(v, e1, e2) ->
       begin match self#emit_expr env e1 with
         None -> ()
