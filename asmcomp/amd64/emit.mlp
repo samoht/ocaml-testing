@@ -332,24 +332,33 @@ let tailrec_entry_point = ref 0
 
 let float_constants = ref ([] : (int * string) list)
 
-let line_tbl = Hashtbl.create 1024
-let last_line = ref (-1)
-let print_file = ref true
+(* Emit debug information *)
+
+(* This assoc list is expected to be very short *)
+let file_pos_nums =
+  (ref [] : (string * int) list ref)
+
+let file_pos_num_cnt = ref 1
+
+(* We only diplay .file if the file has not been seen before. We
+   display .loc for every instruction. *)
+let emit_debug_info dbg =
+  let line = dbg.Debuginfo.dinfo_line in
+  let file_name = dbg.Debuginfo.dinfo_file in
+  if !Clflags.debug && not (Debuginfo.is_none dbg) then (
+    let file_num =
+      try List.assoc file_name !file_pos_nums
+      with Not_found ->
+        let file_num = !file_pos_num_cnt in
+        incr file_pos_num_cnt;
+        `	.file	{emit_int file_num}	{emit_string_literal file_name}\n`;
+        file_pos_nums := (file_name,file_num) :: !file_pos_nums;
+        file_num in
+    `	.loc	{emit_int file_num}	{emit_int line}\n`
+  )
 
 let emit_instr fallthrough i =
-  let line = i.dbg.Debuginfo.dinfo_line in
-  if not (Debuginfo.is_none i.dbg) &&
-     !last_line <> line &&
-     not (Hashtbl.mem line_tbl line)
-  then begin
-    if !print_file then (
-      print_file := false;
-      `	.file 1 {emit_string_literal i.dbg.Debuginfo.dinfo_file}\n`
-    );
-    last_line := line;
-    Hashtbl.add line_tbl line ();
-    `	.loc 1 {emit_int !last_line}\n`
-  end;
+  emit_debug_info i.dbg;
   match i.desc with
       Lend -> ()
     | Lop(Imove | Ispill | Ireload) ->
