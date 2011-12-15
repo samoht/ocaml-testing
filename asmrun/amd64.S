@@ -18,6 +18,8 @@
 
 /* PIC mode support based on contribution by Paul Stravers (see PR#4795) */
 
+#include "../config/m.h"
+
 #ifdef SYS_macosx
 
 #define LBL(x) L##x	
@@ -47,6 +49,16 @@
         .align FUNCTION_ALIGN; \
         name:
 
+#endif
+
+#ifdef ASM_CFI_SUPPORTED
+#define CFI_STARTPROC .cfi_startproc
+#define CFI_ENDPROC .cfi_endproc
+#define CFI_ADJUST(n) .cfi_adjust_cfa_offset n
+#else
+#define CFI_STARTPROC
+#define CFI_ENDPROC
+#define CFI_ADJUST(n)
 #endif
 
 #ifdef __PIC__
@@ -127,6 +139,7 @@
 /* Allocation */
 
 FUNCTION(G(caml_call_gc))
+        CFI_STARTPROC
         RECORD_STACK_FRAME(0)
 LBL(caml_call_gc):
     /* Build array of registers, save it into caml_gc_regs */
@@ -149,6 +162,7 @@ LBL(caml_call_gc):
 	STORE_VAR(%r14, caml_exception_pointer)
     /* Save floating-point registers */
         subq    $(16*8), %rsp
+        CFI_ADJUST(232)
         movsd   %xmm0, 0*8(%rsp)
         movsd   %xmm1, 1*8(%rsp)
         movsd   %xmm2, 2*8(%rsp)
@@ -201,8 +215,10 @@ LBL(caml_call_gc):
         popq    %rbp
         popq    %r12
         popq    %r13
+        CFI_ADJUST(-232)
     /* Return to caller */
         ret
+        CFI_ENDPROC
 
 FUNCTION(G(caml_alloc1))
 LBL(caml_alloc1):
@@ -279,6 +295,7 @@ LBL(caml_c_call):
 /* Start the Caml program */
 
 FUNCTION(G(caml_start_program))
+        CFI_STARTPROC
     /* Save callee-save registers */
         pushq   %rbx
         pushq   %rbp
@@ -287,6 +304,7 @@ FUNCTION(G(caml_start_program))
         pushq   %r14
         pushq   %r15
 	subq	$8, %rsp	/* stack 16-aligned */
+        CFI_ADJUST(56)
     /* Initial entry point is G(caml_program) */
         leaq    GCALL(caml_program)(%rip), %r12
     /* Common code for caml_start_program and caml_callback* */
@@ -296,6 +314,7 @@ LBL(caml_start_program):
         PUSH_VAR(caml_gc_regs)
         PUSH_VAR(caml_last_return_address)
         PUSH_VAR(caml_bottom_of_stack)
+        CFI_ADJUST(32)
     /* Setup alloc ptr and exception ptr */
 	LOAD_VAR(caml_young_ptr, %r15)
 	LOAD_VAR(caml_exception_pointer, %r14)
@@ -303,6 +322,7 @@ LBL(caml_start_program):
         lea     LBL(108)(%rip), %r13
         pushq   %r13
         pushq   %r14
+        CFI_ADJUST(16)
         movq    %rsp, %r14
     /* Call the Caml code */
         call    *%r12
@@ -310,6 +330,7 @@ LBL(107):
     /* Pop the exception handler */
         popq    %r14
         popq    %r12    /* dummy register */
+        CFI_ADJUST(-16)
 LBL(109):
     /* Update alloc ptr and exception ptr */
 	STORE_VAR(%r15,caml_young_ptr)
@@ -334,7 +355,8 @@ LBL(108):
     /* Mark the bucket as an exception result and return it */
         orq     $2, %rax
         jmp     LBL(109)
-
+        CFI_ENDPROC
+        
 /* Raise an exception from Caml */
 
 FUNCTION(G(caml_raise_exn))

@@ -192,3 +192,23 @@ let is_generic_function name =
   List.exists
     (fun p -> isprefix p name)
     ["caml_apply"; "caml_curry"; "caml_send"; "caml_tuplify"]
+
+(* CFI directives *)
+
+let is_cfi_enabled () =
+  !Clflags.debug && Config.asm_cfi_supported
+
+let cfi_startproc () =
+  if is_cfi_enabled () then
+    emit_string "	.cfi_startproc\n"
+
+let cfi_endproc () =
+  if is_cfi_enabled () then
+    emit_string "	.cfi_endproc\n"
+
+let cfi_adjust_cfa_offset n =
+  if is_cfi_enabled () then
+  begin
+    emit_string "	.cfi_adjust_cfa_offset	"; emit_int n; emit_string "\n";
+  end
+ 
