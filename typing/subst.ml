@@ -78,14 +78,13 @@ let newpersty desc =
 let rec typexp s ty =
   let ty = repr ty in
   match ty.desc with
-    Tvar _ | Tunivar _ ->
+    Tvar _ | Tunivar _ as desc ->
       if s.for_saving || ty.id < 0 then
-        let desc = match ty.desc with (* Tvar _ -> Tvar None *) | d -> d in
         let ty' =
           if s.for_saving then newpersty desc
           else newty2 ty.level desc
         in
-        save_desc ty ty.desc; ty.desc <- Tsubst ty'; ty'
+        save_desc ty desc; ty.desc <- Tsubst ty'; ty'
       else ty
   | Tsubst ty ->
       ty
@@ -129,7 +128,7 @@ let rec typexp s ty =
               let more' =
                 match more.desc with
                   Tsubst ty -> ty
-                | Tconstr _ -> typexp s more
+                | Tconstr _ | Tnil -> typexp s more
                 | Tunivar _ | Tvar _ ->
                     save_desc more more.desc;
                     if s.for_saving then newpersty more.desc else
@@ -180,9 +179,7 @@ let type_declaration s decl =
               (List.map (fun (n, mut, arg) -> (n, mut, typexp s arg)) lbls,
                rep)
         end;
-
       type_manifest =
-
         begin 
 	  match decl.type_manifest with
             None -> None
@@ -191,6 +188,7 @@ let type_declaration s decl =
       type_private = decl.type_private;
       type_variance = decl.type_variance;
       type_newtype_level = None;
+      type_loc = if s.for_saving then Location.none else decl.type_loc;
     }
   in
   cleanup_types ();
@@ -249,7 +247,9 @@ let class_type s cty =
 
 let value_description s descr =
   { val_type = type_expr s descr.val_type;
-    val_kind = descr.val_kind }
+    val_kind = descr.val_kind;
+    val_loc = if s.for_saving then Location.none else descr.val_loc;
+   }
 
 let exception_declaration s tyl =
   List.map (type_expr s) tyl
