@@ -440,19 +440,19 @@ let rec add_debug_info ev u =
   | Lev_after _ ->
       begin match u with
       | Udirect_apply(lbl, args, dinfo) ->
-          Udirect_apply(lbl, args, Debuginfo.from_call ev)
+          Udirect_apply(lbl, args, Debuginfo.dbg_of_call ev)
       | Ugeneric_apply(Udirect_apply(lbl, args1, dinfo1),
                        args2, dinfo2) ->
-          Ugeneric_apply(Udirect_apply(lbl, args1, Debuginfo.from_call ev),
-                         args2, Debuginfo.from_call ev)
+          Ugeneric_apply(Udirect_apply(lbl, args1, Debuginfo.dbg_of_call ev),
+                         args2, Debuginfo.dbg_of_call ev)
       | Ugeneric_apply(fn, args, dinfo) ->
-          Ugeneric_apply(fn, args, Debuginfo.from_call ev)
+          Ugeneric_apply(fn, args, Debuginfo.dbg_of_call ev)
       | Uprim(Praise, args, dinfo) ->
-          Uprim(Praise, args, Debuginfo.from_call ev)
+          Uprim(Praise, args, Debuginfo.dbg_of_call ev)
       | Uprim(p, args, dinfo) ->
-          Uprim(p, args, Debuginfo.from_call ev)
+          Uprim(p, args, Debuginfo.dbg_of_call ev)
       | Usend(kind, u1, u2, args, dinfo) ->
-          Usend(kind, u1, u2, args, Debuginfo.from_call ev)
+          Usend(kind, u1, u2, args, Debuginfo.dbg_of_call ev)
       | Usequence(u1, u2) ->
           Usequence(u1, add_debug_info ev u2)
       | _ -> u
@@ -588,7 +588,7 @@ let rec close fenv cenv = function
        Value_unknown)
   | Lprim(Praise, [Levent(arg, ev)]) ->
       let (ulam, approx) = close fenv cenv arg in
-      (Uprim(Praise, [ulam], Debuginfo.from_raise ev),
+      (Uprim(Praise, [ulam], Debuginfo.dbg_of_raise ev),
        Value_unknown)
   | Lprim(p, args) ->
       simplif_prim p (close_list_approx fenv cenv args) Debuginfo.none

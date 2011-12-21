@@ -13,7 +13,11 @@
 open Lexing
 open Location
 
-type kind = Dinfo_call | Dinfo_raise
+type kind =
+  | Dinfo_none
+  | Dinfo_call
+  | Dinfo_raise
+  | Dinfo_event
 
 type t = {
   dinfo_kind: kind;
@@ -23,22 +27,41 @@ type t = {
   dinfo_char_end: int
 }
 
+type 'a expression = {
+  exp: 'a;
+  dbg: t;
+}
+
 let none = {
-  dinfo_kind = Dinfo_call;
+  dinfo_kind = Dinfo_none;
   dinfo_file = "";
   dinfo_line = 0;
   dinfo_char_start = 0;
   dinfo_char_end = 0
 }
 
-let to_string d =
-  if d == none
-  then ""
-  else Printf.sprintf "{%s:%d,%d-%d}"
-           d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end
+let mkdbg dbg exp = {exp; dbg}
+let mk exp = mkdbg none exp
 
-let from_location kind loc =
-  if loc.loc_ghost then none else
+let is_none d =
+  d.dinfo_kind = Dinfo_none
+
+let string_of_dbg d =
+  if is_none d
+  then ""
+  else
+    let k = match d.dinfo_kind with
+      | Dinfo_none  -> "*"
+      | Dinfo_call  -> "c"
+      | Dinfo_raise -> "r"
+      | Dinfo_event -> "e" in
+    Printf.sprintf "{%s:%d,%d-%d|%s}"
+           d.dinfo_file d.dinfo_line d.dinfo_char_start d.dinfo_char_end k
+
+let dbg_of_location kind loc =
+  if loc == Location.none then
+    none
+  else
   { dinfo_kind = kind;
     dinfo_file = loc.loc_start.pos_fname;
     dinfo_line = loc.loc_start.pos_lnum;
@@ -48,5 +71,15 @@ let from_location kind loc =
       then loc.loc_end.pos_cnum - loc.loc_start.pos_bol
       else loc.loc_start.pos_cnum - loc.loc_start.pos_bol }
 
-let from_call ev = from_location Dinfo_call ev.Lambda.lev_loc
-let from_raise ev = from_location Dinfo_raise ev.Lambda.lev_loc
+let from kind ev =
+  dbg_of_location kind ev.Lambda.lev_loc
+
+let dbg_of_call  = from Dinfo_call 
+let dbg_of_raise = from Dinfo_raise
+let dbg_of_event = from Dinfo_event
+
+let needs_slot_in_frame ev = match ev.dinfo_kind with
+  | Dinfo_none 
+  | Dinfo_event -> false
+  | Dinfo_raise
+  | Dinfo_call  -> true

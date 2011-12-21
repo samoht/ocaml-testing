@@ -183,7 +183,7 @@ let rec instr ppf i =
       fprintf ppf "raise %a" reg i.arg.(0)
   end;
   if i.dbg != Debuginfo.none then
-    fprintf ppf " %s" (Debuginfo.to_string i.dbg);
+    fprintf ppf " %s" (Debuginfo.string_of_dbg i.dbg);
   begin match i.next.desc with
     Iend -> ()
   | _ -> fprintf ppf "@,%a" instr i.next

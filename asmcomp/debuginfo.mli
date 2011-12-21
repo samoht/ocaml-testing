@@ -10,7 +10,11 @@
 (*                                                                     *)
 (***********************************************************************)
 
-type kind = Dinfo_call | Dinfo_raise
+type kind =
+  | Dinfo_none
+  | Dinfo_call
+  | Dinfo_raise
+  | Dinfo_event
 
 type t = {
   dinfo_kind: kind;
@@ -20,11 +24,29 @@ type t = {
   dinfo_char_end: int
 }
 
+type 'a expression = {
+  exp: 'a;
+  dbg: t;
+}
+
 val none: t
 
-val to_string: t -> string
+(** Build an expression with no debuging information (ie. with the
+    value [none]) *)
+val mk: 'a -> 'a expression
 
-val from_location: kind -> Location.t -> t
+val mkdbg: t -> 'a -> 'a expression
 
-val from_call: Lambda.lambda_event -> t
-val from_raise: Lambda.lambda_event -> t
+(** Marshalled and unmarshalled [none] value will not be physically
+    equal, so it is safer to use [is_none] instead of [(==)]. *)
+val is_none : t -> bool
+
+val string_of_dbg: t -> string
+
+val dbg_of_location: kind -> Location.t -> t
+
+val dbg_of_call : Lambda.lambda_event -> t
+val dbg_of_raise: Lambda.lambda_event -> t
+val dbg_of_event: Lambda.lambda_event -> t
+
+val needs_slot_in_frame: t -> bool

@@ -51,9 +51,9 @@ let chunk = function
   | Double_u -> "float64u"
 
 let operation = function
-  | Capply(ty, d) -> "app" ^ Debuginfo.to_string d
+  | Capply(ty, d) -> "app" ^ Debuginfo.string_of_dbg d
   | Cextcall(lbl, ty, alloc, d) ->
-      Printf.sprintf "extcall \"%s\"%s" lbl (Debuginfo.to_string d)
+      Printf.sprintf "extcall \"%s\"%s" lbl (Debuginfo.string_of_dbg d)
   | Cload Word -> "load"
   | Cload c -> Printf.sprintf "load %s" (chunk c)
   | Calloc -> "alloc"
@@ -83,8 +83,8 @@ let operation = function
   | Cfloatofint -> "floatofint"
   | Cintoffloat -> "intoffloat"
   | Ccmpf c -> Printf.sprintf "%sf" (comparison c)
-  | Craise d -> "raise" ^ Debuginfo.to_string d
-  | Ccheckbound d -> "checkbound" ^ Debuginfo.to_string d
+  | Craise d -> "raise" ^ Debuginfo.string_of_dbg d
+  | Ccheckbound d -> "checkbound" ^ Debuginfo.string_of_dbg d
 
 let rec expr ppf = function
   | Cconst_int n -> fprintf ppf "%i" n
