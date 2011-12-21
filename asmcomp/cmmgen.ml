@@ -374,8 +374,7 @@ let make_float_alloc tag args =
 let fundecls_size fundecls =
   let sz = ref (-1) in
   List.iter
-    (fun (label, arity, params, body) ->
-      sz := !sz + 1 + (if arity = 1 then 2 else 3))
+    (fun f -> sz := !sz + 1 + (if f.arity = 1 then 2 else 3))
     fundecls;
   !sz
 
@@ -450,7 +449,7 @@ let transl_constant = function
 (* Translate constant closures *)
 
 let constant_closures =
-  ref ([] : (string * (string * int * Ident.t list * ulambda) list) list)
+  ref ([] : (string * ufunction list) list)
 
 (* Boxed integers *)
 
@@ -797,7 +796,7 @@ let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
 
 (* Translate an expression *)
 
-let functions = (Queue.create() : (string * Ident.t list * ulambda) Queue.t)
+let functions = (Queue.create() : ufunction Queue.t)
 
 let rec transl = function
     Uvar id ->
@@ -807,10 +806,7 @@ let rec transl = function
   | Uclosure(fundecls, []) ->
       let lbl = new_const_symbol() in
       constant_closures := (lbl, fundecls) :: !constant_closures;
-      List.iter
-        (fun (label, arity, params, body) ->
-          Queue.add (label, params, body) functions)
-        fundecls;
+      List.iter (fun f -> Queue.add f functions) fundecls;
       Cconst_symbol lbl
   | Uclosure(fundecls, clos_vars) ->
       let block_size =
@@ -818,22 +814,22 @@ let rec transl = function
       let rec transl_fundecls pos = function
           [] ->
             List.map transl clos_vars
-        | (label, arity, params, body) :: rem ->
-            Queue.add (label, params, body) functions;
+        | f :: rem ->
+            Queue.add f functions;
             let header =
               if pos = 0
               then alloc_closure_header block_size
               else alloc_infix_header pos in
-            if arity = 1 then
+            if f.arity = 1 then
               header ::
-              Cconst_symbol label ::
+              Cconst_symbol f.label ::
               int_const 1 ::
               transl_fundecls (pos + 3) rem
             else
               header ::
-              Cconst_symbol(curry_function arity) ::
-              int_const arity ::
-              Cconst_symbol label ::
+              Cconst_symbol(curry_function f.arity) ::
+              int_const f.arity ::
+              Cconst_symbol f.label ::
               transl_fundecls (pos + 4) rem in
       Cop(Calloc, transl_fundecls 0 fundecls)
   | Uoffset(arg, offset) ->
@@ -1543,12 +1539,13 @@ module StringSet =
 
 let rec transl_all_functions already_translated cont =
   try
-    let (lbl, params, body) = Queue.take functions in
-    if StringSet.mem lbl already_translated then
+    let f = Queue.take functions in
+    if StringSet.mem f.label already_translated then
       transl_all_functions already_translated cont
     else begin
-      transl_all_functions (StringSet.add lbl already_translated)
-                           (transl_function lbl params body :: cont)
+      transl_all_functions
+        (StringSet.add f.label already_translated)
+        (transl_function f.label f.params f.body :: cont)
     end
   with Queue.Empty ->
     cont
@@ -1680,31 +1677,31 @@ and emit_boxed_int64_constant n cont =
 let emit_constant_closure symb fundecls cont =
   match fundecls with
     [] -> assert false
-  | (label, arity, params, body) :: remainder ->
+  | f1 :: remainder ->
       let rec emit_others pos = function
         [] -> cont
-      | (label, arity, params, body) :: rem ->
-          if arity = 1 then
+      | f2 :: rem ->
+          if f2.arity = 1 then
             Cint(infix_header pos) ::
-            Csymbol_address label ::
+            Csymbol_address f2.label ::
             Cint 3n ::
             emit_others (pos + 3) rem
           else
             Cint(infix_header pos) ::
-            Csymbol_address(curry_function arity) ::
-            Cint(Nativeint.of_int (arity lsl 1 + 1)) ::
-            Csymbol_address label ::
+            Csymbol_address(curry_function f2.arity) ::
+            Cint(Nativeint.of_int (f2.arity lsl 1 + 1)) ::
+            Csymbol_address f2.label ::
             emit_others (pos + 4) rem in
       Cint(closure_header (fundecls_size fundecls)) ::
       Cdefine_symbol symb ::
-      if arity = 1 then
-        Csymbol_address label ::
+      if f1.arity = 1 then
+        Csymbol_address f1.label ::
         Cint 3n ::
         emit_others 3 remainder
       else
-        Csymbol_address(curry_function arity) ::
-        Cint(Nativeint.of_int (arity lsl 1 + 1)) ::
-        Csymbol_address label ::
+        Csymbol_address(curry_function f1.arity) ::
+        Cint(Nativeint.of_int (f1.arity lsl 1 + 1)) ::
+        Csymbol_address f1.label ::
         emit_others 4 remainder
 
 (* Emit all structured constants *)

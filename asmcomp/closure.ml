@@ -725,7 +725,10 @@ and close_functions fenv cenv fun_defs =
     let (ubody, approx) = close fenv_rec cenv_body body in
     if !useless_env && occurs_var env_param ubody then useless_env := false;
     let fun_params = if !useless_env then params else params @ [env_param] in
-    ((fundesc.fun_label, fundesc.fun_arity, fun_params, ubody),
+    ({ label  = fundesc.fun_label;
+       arity  = fundesc.fun_arity;
+       params = fun_params;
+       body   = ubody },
      (id, env_pos, Value_closure(fundesc, approx))) in
   (* Translate all function definitions. *)
   let clos_info_list =
@@ -755,11 +758,12 @@ and close_functions fenv cenv fun_defs =
 
 and close_one_function fenv cenv id funct =
   match close_functions fenv cenv [id, funct] with
-      ((Uclosure([_, _, params, body], _) as clos),
+      ((Uclosure([f], _) as clos),
        [_, _, (Value_closure(fundesc, _) as approx)]) ->
         (* See if the function can be inlined *)
-        if lambda_smaller body (!Clflags.inline_threshold + List.length params)
-        then fundesc.fun_inline <- Some(params, body);
+        if lambda_smaller f.body
+          (!Clflags.inline_threshold + List.length f.params)
+        then fundesc.fun_inline <- Some(f.params, f.body);
         (clos, approx)
     | _ -> fatal_error "Closure.close_one_function"
 
