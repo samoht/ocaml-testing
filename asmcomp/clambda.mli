@@ -20,16 +20,16 @@ open Lambda
 
 type function_label = string
 
-type ulambda =
+type ulambda_desc =
     Uvar of Ident.t
   | Uconst of structured_constant
-  | Udirect_apply of function_label * ulambda list * Debuginfo.t
-  | Ugeneric_apply of ulambda * ulambda list * Debuginfo.t
+  | Udirect_apply of function_label * ulambda list
+  | Ugeneric_apply of ulambda * ulambda list
   | Uclosure of ufunction list * ulambda list
   | Uoffset of ulambda * int
   | Ulet of Ident.t * ulambda * ulambda
   | Uletrec of (Ident.t * ulambda) list * ulambda
-  | Uprim of primitive * ulambda list * Debuginfo.t
+  | Uprim of primitive * ulambda list
   | Uswitch of ulambda * ulambda_switch
   | Ustaticfail of int * ulambda list
   | Ucatch of int * Ident.t list * ulambda * ulambda
@@ -39,7 +39,7 @@ type ulambda =
   | Uwhile of ulambda * ulambda
   | Ufor of Ident.t * ulambda * ulambda * direction_flag * ulambda
   | Uassign of Ident.t * ulambda
-  | Usend of meth_kind * ulambda * ulambda * ulambda list * Debuginfo.t
+  | Usend of meth_kind * ulambda * ulambda * ulambda list
 
 and ufunction = {
   label  : function_label;
@@ -48,6 +48,8 @@ and ufunction = {
   body   : ulambda;
   dbg    : Debuginfo.t;
 }
+
+and ulambda = ulambda_desc Debuginfo.expression
 
 and ulambda_switch =
   { us_index_consts: int array;
@@ -71,3 +73,4 @@ type value_approximation =
   | Value_unknown
   | Value_integer of int
   | Value_constptr of int
+

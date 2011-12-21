@@ -21,8 +21,10 @@ open Primitive
 open Types
 open Lambda
 open Clambda
+open Debuginfo
 open Cmm
 open Cmx_format
+
 
 (* Local binding of complex expressions *)
 
@@ -297,16 +299,20 @@ let array_indexing log2size ptr ofs =
 
 let addr_array_ref arr ofs =
   Cop(Cload Word, [array_indexing log2_size_addr arr ofs])
+
 let unboxed_float_array_ref arr ofs =
   Cop(Cload Double_u, [array_indexing log2_size_float arr ofs])
+
 let float_array_ref arr ofs =
   box_float(unboxed_float_array_ref arr ofs)
 
 let addr_array_set arr ofs newval =
   Cop(Cextcall("caml_modify", typ_void, false, Debuginfo.none),
       [array_indexing log2_size_addr arr ofs; newval])
+
 let int_array_set arr ofs newval =
   Cop(Cstore Word, [array_indexing log2_size_addr arr ofs; newval])
+
 let float_array_set arr ofs newval =
   Cop(Cstore Double_u, [array_indexing log2_size_float arr ofs; newval])
 
@@ -382,16 +388,17 @@ type rhs_kind =
   | RHS_block of int
   | RHS_nonrec
 ;;
-let rec expr_size = function
+let rec expr_size ulam =
+  match ulam.exp with
   | Uclosure(fundecls, clos_vars) ->
       RHS_block (fundecls_size fundecls + List.length clos_vars)
   | Ulet(id, exp, body) ->
       expr_size body
   | Uletrec(bindings, body) ->
       expr_size body
-  | Uprim(Pmakeblock(tag, mut), args, _) ->
+  | Uprim(Pmakeblock(tag, mut), args) ->
       RHS_block (List.length args)
-  | Uprim(Pmakearray(Paddrarray | Pintarray), args, _) ->
+  | Uprim(Pmakearray(Paddrarray | Pintarray), args) ->
       RHS_block (List.length args)
   | Usequence(exp, exp') ->
       expr_size exp'
@@ -680,6 +687,7 @@ let make_switch_gen arg cases acts =
     let new_act = store.Switch.act_store act in
     new_cases.(i) <- new_act
   done ;
+
   Cswitch
     (arg, new_cases,
      Array.map
@@ -724,10 +732,11 @@ type unboxed_number_kind =
   | Boxed_float
   | Boxed_integer of boxed_integer
 
-let is_unboxed_number = function
+let is_unboxed_number ulam =
+  match ulam.exp with
     Uconst(Const_base(Const_float f)) ->
       Boxed_float
-  | Uprim(p, _, _) ->
+  | Uprim(p, _) ->
       begin match simplif_primitive p with
           Pccall p -> if p.prim_native_float then Boxed_float else No_unboxing
         | Pfloatfield _ -> Boxed_float
@@ -798,7 +807,10 @@ let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
 
 let functions = (Queue.create() : ufunction Queue.t)
 
-let rec transl = function
+let rec transl ulam =
+  let dbg = ulam.dbg in
+  let mk = mkdbg dbg in
+  match ulam.exp with
     Uvar id ->
       Cvar id
   | Uconst sc ->
@@ -834,17 +846,17 @@ let rec transl = function
       Cop(Calloc, transl_fundecls 0 fundecls)
   | Uoffset(arg, offset) ->
       field_address (transl arg) offset
-  | Udirect_apply(lbl, args, dbg) ->
+  | Udirect_apply(lbl, args) ->
       Cop(Capply(typ_addr, dbg), Cconst_symbol lbl :: List.map transl args)
-  | Ugeneric_apply(clos, [arg], dbg) ->
+  | Ugeneric_apply(clos, [arg]) ->
       bind "fun" (transl clos) (fun clos ->
         Cop(Capply(typ_addr, dbg), [get_field clos 0; transl arg; clos]))
-  | Ugeneric_apply(clos, args, dbg) ->
+  | Ugeneric_apply(clos, args) ->
       let arity = List.length args in
       let cargs = Cconst_symbol(apply_function arity) ::
         List.map transl (args @ [clos]) in
       Cop(Capply(typ_addr, dbg), cargs)
-  | Usend(kind, met, obj, args, dbg) ->
+  | Usend(kind, met, obj, args) ->
       let call_met obj args clos =
         if args = [] then
           Cop(Capply(typ_addr, dbg), [get_field clos 0;obj;clos])
@@ -878,7 +890,7 @@ let rec transl = function
       transl_letrec bindings (transl body)
 
   (* Primitives *)
-  | Uprim(prim, args, dbg) ->
+  | Uprim(prim, args) ->
       begin match (simplif_primitive prim, args) with
         (Pgetglobal id, []) ->
           Cconst_symbol (Ident.name id)
@@ -972,25 +984,25 @@ let rec transl = function
       Ccatch(nfail, ids, transl body, transl handler)
   | Utrywith(body, exn, handler) ->
       Ctrywith(transl body, exn, transl handler)
-  | Uifthenelse(Uprim(Pnot, [arg], _), ifso, ifnot) ->
-      transl (Uifthenelse(arg, ifnot, ifso))
-  | Uifthenelse(cond, ifso, Ustaticfail (nfail, [])) ->
+  | Uifthenelse({exp=Uprim(Pnot, [arg])}, ifso, ifnot) ->
+      transl (mk(Uifthenelse(arg, ifnot, ifso)))
+  | Uifthenelse(cond, ifso, {exp=Ustaticfail (nfail, [])}) ->
       exit_if_false cond (transl ifso) nfail
-  | Uifthenelse(cond, Ustaticfail (nfail, []), ifnot) ->
+  | Uifthenelse(cond, {exp=Ustaticfail (nfail, [])}, ifnot) ->
       exit_if_true cond nfail (transl ifnot)
-  | Uifthenelse(Uprim(Psequand, _, _) as cond, ifso, ifnot) ->
+  | Uifthenelse({exp=Uprim(Psequand, _)} as cond, ifso, ifnot) ->
       let raise_num = next_raise_count () in
       make_catch
         raise_num
         (exit_if_false cond (transl ifso) raise_num)
         (transl ifnot)
-  | Uifthenelse(Uprim(Psequor, _, _) as cond, ifso, ifnot) ->
+  | Uifthenelse({exp=Uprim(Psequor, _)} as cond, ifso, ifnot) ->
       let raise_num = next_raise_count () in
       make_catch
         raise_num
         (exit_if_true cond raise_num (transl ifnot))
         (transl ifso)
-  | Uifthenelse (Uifthenelse (cond, condso, condnot), ifso, ifnot) ->
+  | Uifthenelse ({exp=Uifthenelse (cond, condso, condnot)}, ifso, ifnot) ->
       let num_true = next_raise_count () in
       make_catch
         num_true
@@ -1066,7 +1078,7 @@ and transl_prim_1 p arg dbg =
       if no_overflow_lsl n then
         add_const (transl arg) (n lsl 1)
       else
-        transl_prim_2 Paddint arg (Uconst (Const_base(Const_int n))) Debuginfo.none
+        transl_prim_2 Paddint arg (mk(Uconst (Const_base(Const_int n)))) Debuginfo.none
   | Poffsetref n ->
       return_unit
         (bind "ref" (transl arg) (fun arg ->
@@ -1363,20 +1375,22 @@ and transl_prim_3 p arg1 arg2 arg3 dbg =
   | _ ->
     fatal_error "Cmmgen.transl_prim_3"
 
-and transl_unbox_float = function
+and transl_unbox_float ulam =
+  match ulam.exp with
     Uconst(Const_base(Const_float f)) -> Cconst_float f
-  | exp -> unbox_float(transl exp)
+  | _ -> unbox_float(transl ulam)
 
-and transl_unbox_int bi = function
+and transl_unbox_int bi ulam =
+  match ulam.exp with
     Uconst(Const_base(Const_int32 n)) ->
       Cconst_natint (Nativeint.of_int32 n)
   | Uconst(Const_base(Const_nativeint n)) ->
       Cconst_natint n
   | Uconst(Const_base(Const_int64 n)) ->
       assert (size_int = 8); Cconst_natint (Int64.to_nativeint n)
-  | Uprim(Pbintofint bi', [Uconst(Const_base(Const_int i))], _) when bi = bi' ->
+  | Uprim(Pbintofint bi', [{exp=Uconst(Const_base(Const_int i))}]) when bi = bi' ->
       Cconst_int i
-  | exp -> unbox_int bi (transl exp)
+  | _ -> unbox_int bi (transl ulam)
 
 and transl_unbox_let box_fn unbox_fn transl_unbox_fn id exp body =
   let unboxed_id = Ident.create (Ident.name id) in
@@ -1406,12 +1420,12 @@ and make_catch2 mk_body handler = match handler with
       handler
 
 and exit_if_true cond nfail otherwise =
-  match cond with
+  match cond.exp with
   | Uconst (Const_pointer 0) -> otherwise
   | Uconst (Const_pointer 1) -> Cexit (nfail,[])
-  | Uprim(Psequor, [arg1; arg2], _) ->
+  | Uprim(Psequor, [arg1; arg2]) ->
       exit_if_true arg1 nfail (exit_if_true arg2 nfail otherwise)
-  | Uprim(Psequand, _, _) ->
+  | Uprim(Psequand, _) ->
       begin match otherwise with
       | Cexit (raise_num,[]) ->
           exit_if_false cond (Cexit (nfail,[])) raise_num
@@ -1422,7 +1436,7 @@ and exit_if_true cond nfail otherwise =
             (exit_if_false cond (Cexit (nfail,[])) raise_num)
             otherwise
       end
-  | Uprim(Pnot, [arg], _) ->
+  | Uprim(Pnot, [arg]) ->
       exit_if_false arg otherwise nfail
   | Uifthenelse (cond, ifso, ifnot) ->
       make_catch2
@@ -1436,12 +1450,12 @@ and exit_if_true cond nfail otherwise =
       Cifthenelse(test_bool(transl cond), Cexit (nfail, []), otherwise)
 
 and exit_if_false cond otherwise nfail =
-  match cond with
+  match cond.exp with
   | Uconst (Const_pointer 0) -> Cexit (nfail,[])
   | Uconst (Const_pointer 1) -> otherwise
-  | Uprim(Psequand, [arg1; arg2], _) ->
+  | Uprim(Psequand, [arg1; arg2]) ->
       exit_if_false arg1 (exit_if_false arg2 otherwise nfail) nfail
-  | Uprim(Psequor, _, _) ->
+  | Uprim(Psequor, _) ->
       begin match otherwise with
       | Cexit (raise_num,[]) ->
           exit_if_true cond raise_num (Cexit (nfail,[]))
@@ -1452,7 +1466,7 @@ and exit_if_false cond otherwise nfail =
             (exit_if_true cond raise_num (Cexit (nfail,[])))
             otherwise
       end
-  | Uprim(Pnot, [arg], _) ->
+  | Uprim(Pnot, [arg]) ->
       exit_if_true arg nfail otherwise
   | Uifthenelse (cond, ifso, ifnot) ->
       make_catch2
@@ -1528,7 +1542,7 @@ let transl_function f =
              fun_args = List.map (fun id -> (id, typ_addr)) f.params;
              fun_body = transl f.body;
              fun_fast = !Clflags.optimize_for_speed;
-             fun_dbg  = f.dbg; }
+             fun_dbg  = f.Clambda.dbg; }
 
 (* Translate all function definitions *)
 

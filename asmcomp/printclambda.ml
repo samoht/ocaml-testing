@@ -20,16 +20,16 @@ let rec pr_idents ppf = function
   | [] -> ()
   | h::t -> fprintf ppf "%a %a" Ident.print h pr_idents t
 
-let rec lam ppf = function
+let rec lam_desc ppf = function
   | Uvar id ->
       Ident.print ppf id
   | Uconst cst ->
       Printlambda.structured_constant ppf cst
-  | Udirect_apply(f, largs, _) ->
+  | Udirect_apply(f, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       fprintf ppf "@[<2>(apply*@ %s %a)@]" f lams largs
-  | Ugeneric_apply(lfun, largs, _) ->
+  | Ugeneric_apply(lfun, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       fprintf ppf "@[<2>(apply@ %a%a)@]" lam lfun lams largs
@@ -37,7 +37,10 @@ let rec lam ppf = function
       let idents ppf =
         List.iter (fprintf ppf "@ %a" Ident.print)in
       let one_fun ppf f =
-        fprintf ppf "(fun@ %s@ %d @[<2>%a@] @[<2>%a@])"
+        fprintf ppf "(";
+        if not (is_none f.Clambda.dbg) then
+          fprintf ppf "%s@ " (string_of_dbg f.Clambda.dbg);
+        fprintf ppf "fun@ %s@ %d @[<2>%a@] @[<2>%a@])"
           f.label f.arity idents f.params lam f.body in
       let funs ppf =
         List.iter (fprintf ppf "@ %a" one_fun) in
@@ -46,7 +49,7 @@ let rec lam ppf = function
       fprintf ppf "@[<2>(closure@ %a %a)@]" funs clos lams fv
   | Uoffset(l,i) -> fprintf ppf "@[<2>(offset %a %d)@]" lam l i
   | Ulet(id, arg, body) ->
-      let rec letbody ul = match ul with
+      let rec letbody ul = match ul.exp with
         | Ulet(id, arg, body) ->
             fprintf ppf "@ @[<2>%a@ %a@]" Ident.print id lam arg;
             letbody body
@@ -64,7 +67,7 @@ let rec lam ppf = function
           id_arg_list in
       fprintf ppf
         "@[<2>(letrec@ (@[<hv 1>%a@])@ %a)@]" bindings id_arg_list lam body
-  | Uprim(prim, largs, _) ->
+  | Uprim(prim, largs) ->
       let lams ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       fprintf ppf "@[<2>(%a%a)@]" Printlambda.primitive prim lams largs
@@ -117,16 +120,25 @@ let rec lam ppf = function
        lam hi lam body
   | Uassign(id, expr) ->
       fprintf ppf "@[<2>(assign@ %a@ %a)@]" Ident.print id lam expr
-  | Usend (k, met, obj, largs, _) ->
+  | Usend (k, met, obj, largs) ->
       let args ppf largs =
         List.iter (fun l -> fprintf ppf "@ %a" lam l) largs in
       let kind =
         if k = Lambda.Self then "self" else if k = Lambda.Cached then "cache" else "" in
       fprintf ppf "@[<2>(send%s@ %a@ %a%a)@]" kind lam obj lam met args largs
 
-and sequence ppf ulam = match ulam with
+and sequence ppf ulam = match ulam.exp with
   | Usequence(l1, l2) ->
       fprintf ppf "%a@ %a" sequence l1 sequence l2
-  | _ -> lam ppf ulam
+  | _ ->
+      lam ppf ulam
+
+and lam ppf ulam =
+  if is_none ulam.dbg then
+    lam_desc ppf ulam.exp
+  else
+    fprintf ppf "@[<2>(%s %a)@]"
+      (string_of_dbg ulam.dbg)
+      lam_desc ulam.exp
 
 let clambda = lam
