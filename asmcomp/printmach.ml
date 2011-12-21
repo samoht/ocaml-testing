@@ -190,8 +190,13 @@ let rec instr ppf i =
   end
 
 let fundecl ppf f =
-  fprintf ppf "@[<v 2>%s(%a)@,%a@]"
-    f.fun_name regs f.fun_args instr f.fun_body
+  let dbg =
+    if Debuginfo.is_none f.fun_dbg then
+      ""
+    else
+      " " ^ Debuginfo.string_of_dbg f.fun_dbg in
+  fprintf ppf "@[<v 2>%s(%a)@,%a@]%s"
+    f.fun_name regs f.fun_args instr f.fun_body dbg
 
 let phase msg ppf f =
   fprintf ppf "*** %s@.%a@." msg fundecl f

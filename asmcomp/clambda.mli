@@ -46,6 +46,7 @@ and ufunction = {
   arity  : int;
   params : Ident.t list;
   body   : ulambda;
+  dbg    : Debuginfo.t;
 }
 
 and ulambda_switch =

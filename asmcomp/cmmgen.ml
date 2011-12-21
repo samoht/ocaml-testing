@@ -1523,11 +1523,12 @@ and transl_letrec bindings cont =
 
 (* Translate a function definition *)
 
-let transl_function lbl params body =
-  Cfunction {fun_name = lbl;
-             fun_args = List.map (fun id -> (id, typ_addr)) params;
-             fun_body = transl body;
-             fun_fast = !Clflags.optimize_for_speed}
+let transl_function f =
+  Cfunction {fun_name = f.label;
+             fun_args = List.map (fun id -> (id, typ_addr)) f.params;
+             fun_body = transl f.body;
+             fun_fast = !Clflags.optimize_for_speed;
+             fun_dbg  = f.dbg; }
 
 (* Translate all function definitions *)
 
@@ -1545,7 +1546,7 @@ let rec transl_all_functions already_translated cont =
     else begin
       transl_all_functions
         (StringSet.add f.label already_translated)
-        (transl_function f.label f.params f.body :: cont)
+        (transl_function f :: cont)
     end
   with Queue.Empty ->
     cont
@@ -1727,7 +1728,8 @@ let compunit size ulam =
   let init_code = transl ulam in
   let c1 = [Cfunction {fun_name = Compilenv.make_symbol (Some "entry");
                        fun_args = [];
-                       fun_body = init_code; fun_fast = false}] in
+                       fun_body = init_code; fun_fast = false;
+                       fun_dbg  = Debuginfo.none }] in
   let c2 = transl_all_functions StringSet.empty c1 in
   let c3 = emit_all_constants c2 in
   Cdata [Cint(block_header 0 size);
@@ -1856,7 +1858,8 @@ let send_function arity =
    {fun_name = "caml_send" ^ string_of_int arity;
     fun_args = fun_args;
     fun_body = body;
-    fun_fast = true}
+    fun_fast = true;
+    fun_dbg  = Debuginfo.none }
 
 let apply_function arity =
   let (args, clos, body) = apply_function_body arity in
@@ -1865,7 +1868,8 @@ let apply_function arity =
    {fun_name = "caml_apply" ^ string_of_int arity;
     fun_args = List.map (fun id -> (id, typ_addr)) all_args;
     fun_body = body;
-    fun_fast = true}
+    fun_fast = true;
+    fun_dbg  = Debuginfo.none }
 
 (* Generate tuplifying functions:
       (defun caml_tuplifyN (arg clos)
@@ -1884,7 +1888,8 @@ let tuplify_function arity =
     fun_body =
       Cop(Capply(typ_addr, Debuginfo.none),
           get_field (Cvar clos) 2 :: access_components 0 @ [Cvar clos]);
-    fun_fast = true}
+    fun_fast = true;
+    fun_dbg  = Debuginfo.none }
 
 (* Generate currying functions:
       (defun caml_curryN (arg clos)
@@ -1920,7 +1925,8 @@ let final_curry_function arity =
                "_" ^ string_of_int (arity-1);
     fun_args = [last_arg, typ_addr; last_clos, typ_addr];
     fun_body = curry_fun [] last_clos (arity-1);
-    fun_fast = true}
+    fun_fast = true;
+    fun_dbg  = Debuginfo.none }
 
 let rec intermediate_curry_functions arity num =
   if num = arity - 1 then
@@ -1936,7 +1942,8 @@ let rec intermediate_curry_functions arity num =
                      [alloc_closure_header 4;
                       Cconst_symbol(name1 ^ "_" ^ string_of_int (num+1));
                       int_const 1; Cvar arg; Cvar clos]);
-      fun_fast = true}
+      fun_fast = true;
+      fun_dbg  = Debuginfo.none }
     :: intermediate_curry_functions arity (num+1)
   end
 
@@ -1989,7 +1996,8 @@ let entry_point namelist =
   Cfunction {fun_name = "caml_program";
              fun_args = [];
              fun_body = body;
-             fun_fast = false}
+             fun_fast = false;
+             fun_dbg  = Debuginfo.none }
 
 (* Generate the table of globals *)
 

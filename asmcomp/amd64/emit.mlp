@@ -338,6 +338,33 @@ let tailrec_entry_point = ref 0
 
 let float_constants = ref ([] : (int * string) list)
 
+(* Emit debug information *)
+
+(* This assoc list is expected to be very short *)
+let file_pos_nums =
+  (ref [] : (string * int) list ref)
+
+(* Number of files *)
+let file_pos_num_cnt = ref 1
+
+(* We only diplay .file if the file has not been seen before. We
+   display .loc for every instruction. *)
+let emit_debug_info dbg =
+  let line = dbg.Debuginfo.dinfo_line in
+  let file_name = dbg.Debuginfo.dinfo_file in
+  if !Clflags.debug && not (Debuginfo.is_none dbg) then (
+    let file_num =
+      try List.assoc file_name !file_pos_nums
+      with Not_found ->
+        let file_num = !file_pos_num_cnt in
+        incr file_pos_num_cnt;
+        `	.file	{emit_int file_num}	{emit_string_literal file_name}\n`;
+        file_pos_nums := (file_name,file_num) :: !file_pos_nums;
+        file_num in
+    `	.loc	{emit_int file_num}	{emit_int line}\n`
+  )
+
+(* Emit an instruction *)
 let emit_instr fallthrough i =
     match i.desc with
       Lend -> ()
@@ -696,6 +723,7 @@ let fundecl fundecl =
   else
     `	.globl	{emit_symbol fundecl.fun_name}\n`;
   `{emit_symbol fundecl.fun_name}:\n`;
+  emit_debug_info fundecl.fun_dbg;
   cfi_startproc ();
   if !Clflags.gprofile then emit_profile();
   if frame_required() then begin

@@ -714,7 +714,9 @@ and close_functions fenv cenv fun_defs =
   let useless_env = ref initially_closed in
   (* Translate each function definition *)
   let clos_fundef (id, params, body, fundesc) env_pos =
-    let env_param = Ident.create "env" in
+    let dbg = match body with
+      | Levent (_,({lev_kind=Lev_function} as ev)) -> Debuginfo.dbg_of_event ev
+      | _ -> Debuginfo.none in   let env_param = Ident.create "env" in
     let cenv_fv =
       build_closure_env env_param (fv_pos - env_pos) fv in
     let cenv_body =
@@ -728,7 +730,8 @@ and close_functions fenv cenv fun_defs =
     ({ label  = fundesc.fun_label;
        arity  = fundesc.fun_arity;
        params = fun_params;
-       body   = ubody },
+       body   = ubody;
+       dbg },
      (id, env_pos, Value_closure(fundesc, approx))) in
   (* Translate all function definitions. *)
   let clos_info_list =
