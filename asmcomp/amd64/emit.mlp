@@ -366,6 +366,7 @@ let emit_debug_info dbg =
 
 (* Emit an instruction *)
 let emit_instr fallthrough i =
+    emit_debug_info i.dbg;
     match i.desc with
       Lend -> ()
     | Lop(Imove | Ispill | Ireload) ->
