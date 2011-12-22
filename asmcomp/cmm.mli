@@ -52,9 +52,10 @@ type memory_chunk =
   | Double                              (* 64-bit-aligned 64-bit float *)
   | Double_u                            (* word-aligned 64-bit float *)
 
+
 type operation =
-    Capply of machtype * Debuginfo.t
-  | Cextcall of string * machtype * bool * Debuginfo.t
+    Capply of machtype
+  | Cextcall of string * machtype * bool
   | Cload of memory_chunk
   | Calloc
   | Cstore of memory_chunk
@@ -67,10 +68,11 @@ type operation =
   | Caddf | Csubf | Cmulf | Cdivf
   | Cfloatofint | Cintoffloat
   | Ccmpf of comparison
-  | Craise of Debuginfo.t
-  | Ccheckbound of Debuginfo.t
+  | Craise
+  | Ccheckbound
 
-type expression =
+
+type expression_desc =
     Cconst_int of int
   | Cconst_natint of nativeint
   | Cconst_float of string
@@ -89,6 +91,8 @@ type expression =
   | Ccatch of int * Ident.t list * expression * expression
   | Cexit of int * expression list
   | Ctrywith of expression * Ident.t * expression
+
+and expression = expression_desc Debuginfo.expression
 
 type fundecl =
   { fun_name: string;

@@ -29,16 +29,22 @@ open Cmx_format
 (* Local binding of complex expressions *)
 
 let bind name arg fn =
-  match arg with
+  match arg.exp with
     Cvar _ | Cconst_int _ | Cconst_natint _ | Cconst_symbol _
   | Cconst_pointer _ | Cconst_natpointer _ -> fn arg
-  | _ -> let id = Ident.create name in Clet(id, arg, fn (Cvar id))
+  | _ ->
+      let id = Ident.create name in
+      let mk = mkdbg arg.dbg in
+      mk(Clet(id, arg, fn (mk(Cvar id))))
 
 let bind_nonvar name arg fn =
-  match arg with
+  match arg.exp with
     Cconst_int _ | Cconst_natint _ | Cconst_symbol _
   | Cconst_pointer _ | Cconst_natpointer _ -> fn arg
-  | _ -> let id = Ident.create name in Clet(id, arg, fn (Cvar id))
+  | _ ->
+      let id = Ident.create name in
+      let mk = mkdbg arg.dbg in
+      mk(Clet(id, arg, fn (mk(Cvar id))))
 
 (* Block headers. Meaning of the tag field: see stdlib/obj.ml *)
 
@@ -80,188 +86,231 @@ let int_const n =
           (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n)
 
 let add_const c n =
-  if n = 0 then c else Cop(Caddi, [c; Cconst_int n])
+  if n = 0 then
+    c
+  else
+    let mk = mkdbg c.dbg in
+    mk(Cop(Caddi, [c; mk(Cconst_int n)]))
 
-let incr_int = function
-    Cconst_int n when n < max_int -> Cconst_int(n+1)
-  | Cop(Caddi, [c; Cconst_int n]) when n < max_int -> add_const c (n + 1)
-  | c -> add_const c 1
+let incr_int c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_int n when n < max_int -> mk(Cconst_int(n+1))
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) when n < max_int -> add_const c (n + 1)
+  | _ -> add_const c 1
 
-let decr_int = function
-    Cconst_int n when n > min_int -> Cconst_int(n-1)
-  | Cop(Caddi, [c; Cconst_int n]) when n > min_int -> add_const c (n - 1)
-  | c -> add_const c (-1)
+let decr_int c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_int n when n > min_int -> mk(Cconst_int(n-1))
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) when n > min_int -> add_const c (n - 1)
+  | _ -> add_const c (-1)
 
 let add_int c1 c2 =
-  match (c1, c2) with
-    (Cop(Caddi, [c1; Cconst_int n1]),
-     Cop(Caddi, [c2; Cconst_int n2])) when no_overflow_add n1 n2 ->
-      add_const (Cop(Caddi, [c1; c2])) (n1 + n2)
-  | (Cop(Caddi, [c1; Cconst_int n1]), c2) ->
-      add_const (Cop(Caddi, [c1; c2])) n1
-  | (c1, Cop(Caddi, [c2; Cconst_int n2])) ->
-      add_const (Cop(Caddi, [c1; c2])) n2
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Caddi, [c1; {exp=Cconst_int n1}]),
+     Cop(Caddi, [c2; {exp=Cconst_int n2}])) when no_overflow_add n1 n2 ->
+      add_const (mk(Cop(Caddi, [c1; c2]))) (n1 + n2)
+  | (Cop(Caddi, [c1; {exp=Cconst_int n1}]), _) ->
+      add_const (mk(Cop(Caddi, [c1; c2]))) n1
+  | (_, Cop(Caddi, [c2; {exp=Cconst_int n2}])) ->
+      add_const (mk(Cop(Caddi, [c1; c2]))) n2
   | (Cconst_int _, _) ->
-      Cop(Caddi, [c2; c1])
+      mk(Cop(Caddi, [c2; c1]))
   | (_, _) ->
-      Cop(Caddi, [c1; c2])
+      mk(Cop(Caddi, [c1; c2]))
 
 let sub_int c1 c2 =
-  match (c1, c2) with
-    (Cop(Caddi, [c1; Cconst_int n1]),
-     Cop(Caddi, [c2; Cconst_int n2])) when no_overflow_sub n1 n2 ->
-      add_const (Cop(Csubi, [c1; c2])) (n1 - n2)
-  | (Cop(Caddi, [c1; Cconst_int n1]), c2) ->
-      add_const (Cop(Csubi, [c1; c2])) n1
-  | (c1, Cop(Caddi, [c2; Cconst_int n2])) when n2 <> min_int ->
-      add_const (Cop(Csubi, [c1; c2])) (-n2)
-  | (c1, Cconst_int n) when n <> min_int ->
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Caddi, [c1; {exp=Cconst_int n1}]),
+     Cop(Caddi, [c2; {exp=Cconst_int n2}])) when no_overflow_sub n1 n2 ->
+      add_const (mk((Cop(Csubi, [c1; c2])))) (n1 - n2)
+  | (Cop(Caddi, [c1; {exp=Cconst_int n1}]), _) ->
+      add_const (mk(Cop(Csubi, [c1; c2]))) n1
+  | (_, Cop(Caddi, [c2; {exp=Cconst_int n2}])) when n2 <> min_int ->
+      add_const (mk(Cop(Csubi, [c1; c2]))) (-n2)
+  | (_, Cconst_int n) when n <> min_int ->
       add_const c1 (-n)
-  | (c1, c2) ->
-      Cop(Csubi, [c1; c2])
+  | (_, _) ->
+      mk(Cop(Csubi, [c1; c2]))
 
 let mul_int c1 c2 =
-  match (c1, c2) with
+  match (c1.exp, c2.exp) with
     (Cconst_int 0, _) -> c1
   | (Cconst_int 1, _) -> c2
   | (_, Cconst_int 0) -> c2
   | (_, Cconst_int 1) -> c1
-  | (_, _) -> Cop(Cmuli, [c1; c2])
+  | (_, _) ->
+      let mk = mkdbg c1.dbg in
+      mk(Cop(Cmuli, [c1; c2]))
 
-let tag_int = function
-    Cconst_int n -> int_const n
-  | c -> Cop(Caddi, [Cop(Clsl, [c; Cconst_int 1]); Cconst_int 1])
+let tag_int c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_int n -> mk(int_const n)
+  | _ -> mk(Cop(Caddi, [mk(Cop(Clsl, [c; mk(Cconst_int 1)])); mk(Cconst_int 1)]))
 
-let force_tag_int = function
-    Cconst_int n -> int_const n
-  | c -> Cop(Cor, [Cop(Clsl, [c; Cconst_int 1]); Cconst_int 1])
+let force_tag_int c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_int n -> mk(int_const n)
+  | _ -> mk(Cop(Cor, [mk(Cop(Clsl, [c; mk(Cconst_int 1)])); mk(Cconst_int 1)]))
 
-let untag_int = function
-    Cconst_int n -> Cconst_int(n asr 1)
-  | Cop(Caddi, [Cop(Clsl, [c; Cconst_int 1]); Cconst_int 1]) -> c
-  | Cop(Cor, [Cop(Casr, [c; Cconst_int n]); Cconst_int 1])
+let untag_int c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_int n -> mk(Cconst_int(n asr 1))
+  | Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) -> c
+  | Cop(Cor, [{exp=Cop(Casr, [c; {exp=Cconst_int n}])}; {exp=Cconst_int 1}])
     when n > 0 && n < size_int * 8 ->
-      Cop(Casr, [c; Cconst_int (n+1)])
-  | Cop(Cor, [Cop(Clsr, [c; Cconst_int n]); Cconst_int 1])
+      mk(Cop(Casr, [c; mk(Cconst_int (n+1))]))
+  | Cop(Cor, [{exp=Cop(Clsr, [c; {exp=Cconst_int n}])}; {exp=Cconst_int 1}])
     when n > 0 && n < size_int * 8 ->
-      Cop(Clsr, [c; Cconst_int (n+1)])
-  | Cop(Cor, [c; Cconst_int 1]) -> Cop(Casr, [c; Cconst_int 1])
-  | c -> Cop(Casr, [c; Cconst_int 1])
+      mk(Cop(Clsr, [c; mk(Cconst_int (n+1))]))
+  | Cop(Cor, [c; {exp=Cconst_int 1}]) -> mk(Cop(Casr, [c; mk(Cconst_int 1)]))
+  | _ -> mk(Cop(Casr, [c; mk(Cconst_int 1)]))
 
 let lsl_int c1 c2 =
-  match (c1, c2) with
-    (Cop(Clsl, [c; Cconst_int n1]), Cconst_int n2)
+  let mk = mkdbg c1.dbg in
+  match (c1.exp, c2.exp) with
+    (Cop(Clsl, [c; {exp=Cconst_int n1}]), Cconst_int n2)
     when n1 > 0 && n2 > 0 && n1 + n2 < size_int * 8 ->
-      Cop(Clsl, [c; Cconst_int (n1 + n2)])
+      mk(Cop(Clsl, [c; mk(Cconst_int (n1 + n2))]))
   | (_, _) ->
-      Cop(Clsl, [c1; c2])
+      mk(Cop(Clsl, [c1; c2]))
 
-let ignore_low_bit_int = function
-    Cop(Caddi, [(Cop(Clsl, [_; Cconst_int 1]) as c); Cconst_int 1]) -> c
-  | Cop(Cor, [c; Cconst_int 1]) -> c
-  | c -> c
+let ignore_low_bit_int c = match c.exp with
+    Cop(Caddi, [({exp=Cop(Clsl, [_; {exp=Cconst_int 1}])} as c); {exp=Cconst_int 1}]) -> c
+  | Cop(Cor, [c; {exp=Cconst_int 1}]) -> c
+  | _ -> c
 
-let is_nonzero_constant = function
+let is_nonzero_constant c = match c.exp with
     Cconst_int n -> n <> 0
   | Cconst_natint n -> n <> 0n
   | _ -> false
 
 let safe_divmod op c1 c2 dbg =
+  let mk = mkdbg dbg in
   if !Clflags.fast || is_nonzero_constant c2 then
-    Cop(op, [c1; c2])
+    mk(Cop(op, [c1; c2]))
   else
     bind "divisor" c2 (fun c2 ->
-      Cifthenelse(c2,
-                  Cop(op, [c1; c2]),
-                  Cop(Craise dbg,
-                      [Cconst_symbol "caml_bucket_Division_by_zero"])))
+      mk(Cifthenelse(c2,
+                  mk(Cop(op, [c1; c2])),
+                  mk(Cop(Craise,
+                      [mk(Cconst_symbol "caml_bucket_Division_by_zero")])))))
 
 (* Bool *)
 
-let test_bool = function
-    Cop(Caddi, [Cop(Clsl, [c; Cconst_int 1]); Cconst_int 1]) -> c
-  | Cop(Clsl, [c; Cconst_int 1]) -> c
-  | c -> Cop(Ccmpi Cne, [c; Cconst_int 1])
+let test_bool c = match c.exp with
+    Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) -> c
+  | Cop(Clsl, [c; {exp=Cconst_int 1}]) -> c
+  | _ ->
+    let mk = mkdbg c.dbg in
+    mk(Cop(Ccmpi Cne, [c; mk(Cconst_int 1)]))
 
 (* Float *)
 
-let box_float c = Cop(Calloc, [alloc_float_header; c])
+let box_float c =
+  let mk = mkdbg c.dbg in
+  mk(Cop(Calloc, [mk alloc_float_header; c]))
 
-let rec unbox_float = function
+let rec unbox_float c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
     Cop(Calloc, [header; c]) -> c
-  | Clet(id, exp, body) -> Clet(id, exp, unbox_float body)
+  | Clet(id, exp, body) -> mk(Clet(id, exp, unbox_float body))
   | Cifthenelse(cond, e1, e2) ->
-      Cifthenelse(cond, unbox_float e1, unbox_float e2)
-  | Csequence(e1, e2) -> Csequence(e1, unbox_float e2)
-  | Cswitch(e, tbl, el) -> Cswitch(e, tbl, Array.map unbox_float el)
-  | Ccatch(n, ids, e1, e2) -> Ccatch(n, ids, unbox_float e1, unbox_float e2)
-  | Ctrywith(e1, id, e2) -> Ctrywith(unbox_float e1, id, unbox_float e2)
-  | c -> Cop(Cload Double_u, [c])
+      mk(Cifthenelse(cond, unbox_float e1, unbox_float e2))
+  | Csequence(e1, e2) -> mk(Csequence(e1, unbox_float e2))
+  | Cswitch(e, tbl, el) -> mk(Cswitch(e, tbl, Array.map unbox_float el))
+  | Ccatch(n, ids, e1, e2) -> mk(Ccatch(n, ids, unbox_float e1, unbox_float e2))
+  | Ctrywith(e1, id, e2) -> mk(Ctrywith(unbox_float e1, id, unbox_float e2))
+  | _ -> mk(Cop(Cload Double_u, [c]))
 
 (* Complex *)
 
 let box_complex c_re c_im =
-  Cop(Calloc, [alloc_floatarray_header 2; c_re; c_im])
+  let mk = mkdbg c_re.dbg in
+  mk(Cop(Calloc, [mk(alloc_floatarray_header 2); c_re; c_im]))
 
-let complex_re c = Cop(Cload Double_u, [c])
-let complex_im c = Cop(Cload Double_u,
-                       [Cop(Cadda, [c; Cconst_int size_float])])
+let complex_re c =
+  let mk = mkdbg c.dbg in
+  mk(Cop(Cload Double_u, [c]))
+
+let complex_im c =
+  let mk = mkdbg c.dbg in
+  mk(Cop(Cload Double_u,
+          [mk(Cop(Cadda, [c; mk(Cconst_int size_float)]))]))
 
 (* Unit *)
 
-let return_unit c = Csequence(c, Cconst_pointer 1)
+let return_unit c =
+  let mk = mkdbg c.dbg in
+  mk(Csequence(c, mk(Cconst_pointer 1)))
 
-let rec remove_unit = function
-    Cconst_pointer 1 -> Ctuple []
-  | Csequence(c, Cconst_pointer 1) -> c
+let rec remove_unit c =
+  let mk = mkdbg c.dbg in
+  match c.exp with
+    Cconst_pointer 1 -> mk(Ctuple [])
+  | Csequence(c, {exp=Cconst_pointer 1}) -> c
   | Csequence(c1, c2) ->
-      Csequence(c1, remove_unit c2)
+      mk(Csequence(c1, remove_unit c2))
   | Cifthenelse(cond, ifso, ifnot) ->
-      Cifthenelse(cond, remove_unit ifso, remove_unit ifnot)
+      mk(Cifthenelse(cond, remove_unit ifso, remove_unit ifnot))
   | Cswitch(sel, index, cases) ->
-      Cswitch(sel, index, Array.map remove_unit cases)
+      mk(Cswitch(sel, index, Array.map remove_unit cases))
   | Ccatch(io, ids, body, handler) ->
-      Ccatch(io, ids, remove_unit body, remove_unit handler)
+      mk(Ccatch(io, ids, remove_unit body, remove_unit handler))
   | Ctrywith(body, exn, handler) ->
-      Ctrywith(remove_unit body, exn, remove_unit handler)
+      mk(Ctrywith(remove_unit body, exn, remove_unit handler))
   | Clet(id, c1, c2) ->
-      Clet(id, c1, remove_unit c2)
-  | Cop(Capply (mty, dbg), args) ->
-      Cop(Capply (typ_void, dbg), args)
-  | Cop(Cextcall(proc, mty, alloc, dbg), args) ->
-      Cop(Cextcall(proc, typ_void, alloc, dbg), args)
-  | Cexit (_,_) as c -> c
-  | Ctuple [] as c -> c
-  | c -> Csequence(c, Ctuple [])
+      mk(Clet(id, c1, remove_unit c2))
+  | Cop(Capply mty, args) ->
+      mk(Cop(Capply (typ_void), args))
+  | Cop(Cextcall(proc, mty, alloc), args) ->
+      mk(Cop(Cextcall(proc, typ_void, alloc), args))
+  | Cexit (_,_) -> c
+  | Ctuple [] -> c
+  | _ -> mk(Csequence(c, mk(Ctuple [])))
 
 (* Access to block fields *)
 
 let field_address ptr n =
   if n = 0
   then ptr
-  else Cop(Cadda, [ptr; Cconst_int(n * size_addr)])
+  else
+    let mk = mkdbg ptr.dbg in
+    mk(Cop(Cadda, [ptr; mk(Cconst_int(n * size_addr))]))
 
 let get_field ptr n =
-  Cop(Cload Word, [field_address ptr n])
+  let mk = mkdbg ptr.dbg in
+  mk(Cop(Cload Word, [field_address ptr n]))
 
 let set_field ptr n newval =
-  Cop(Cstore Word, [field_address ptr n; newval])
+  let mk = mkdbg ptr.dbg in
+  mk(Cop(Cstore Word, [field_address ptr n; newval]))
 
 let header ptr =
-  Cop(Cload Word, [Cop(Cadda, [ptr; Cconst_int(-size_int)])])
+  let mk = mkdbg ptr.dbg in
+  mk(Cop(Cload Word, [mk(Cop(Cadda, [ptr; mk(Cconst_int(-size_int))]))]))
 
 let tag_offset =
   if big_endian then -1 else -size_int
 
 let get_tag ptr =
+  let mk = mkdbg ptr.dbg in
   if Proc.word_addressed then           (* If byte loads are slow *)
-    Cop(Cand, [header ptr; Cconst_int 255])
+    mk(Cop(Cand, [header ptr; mk(Cconst_int 255)]))
   else                                  (* If byte loads are efficient *)
-    Cop(Cload Byte_unsigned,
-        [Cop(Cadda, [ptr; Cconst_int(tag_offset)])])
+    mk(Cop(Cload Byte_unsigned,
+        [mk(Cop(Cadda, [ptr; mk(Cconst_int(tag_offset))]))]))
 
 let get_size ptr =
-  Cop(Clsr, [header ptr; Cconst_int 10])
+  let mk = mkdbg ptr.dbg in
+  mk(Cop(Clsr, [header ptr; mk(Cconst_int 10)]))
 
 (* Array indexing *)
 
@@ -272,108 +321,126 @@ let wordsize_shift = 9
 let numfloat_shift = 9 + log2_size_float - log2_size_addr
 
 let is_addr_array_hdr hdr =
-  Cop(Ccmpi Cne, [Cop(Cand, [hdr; Cconst_int 255]); floatarray_tag])
+  let mk = mkdbg hdr.dbg in
+  mk(Cop(Ccmpi Cne, [mk(Cop(Cand, [hdr; mk(Cconst_int 255)])); mk floatarray_tag]))
 
 let is_addr_array_ptr ptr =
-  Cop(Ccmpi Cne, [get_tag ptr; floatarray_tag])
+  let mk = mkdbg ptr.dbg in
+  mk(Cop(Ccmpi Cne, [get_tag ptr; mk floatarray_tag]))
 
-let addr_array_length hdr = Cop(Clsr, [hdr; Cconst_int wordsize_shift])
-let float_array_length hdr = Cop(Clsr, [hdr; Cconst_int numfloat_shift])
+let addr_array_length hdr =
+  let mk = mkdbg hdr.dbg in
+  mk(Cop(Clsr, [hdr; mk(Cconst_int wordsize_shift)]))
+
+let float_array_length hdr =
+  let mk = mkdbg hdr.dbg in
+  mk(Cop(Clsr, [hdr; mk(Cconst_int numfloat_shift)]))
 
 let lsl_const c n =
-  Cop(Clsl, [c; Cconst_int n])
+  let mk = mkdbg c.dbg in
+  mk(Cop(Clsl, [c; mk(Cconst_int n)]))
 
 let array_indexing log2size ptr ofs =
-  match ofs with
+  let mk = mkdbg ptr.dbg in
+  match ofs.exp with
     Cconst_int n ->
       let i = n asr 1 in
-      if i = 0 then ptr else Cop(Cadda, [ptr; Cconst_int(i lsl log2size)])
-  | Cop(Caddi, [Cop(Clsl, [c; Cconst_int 1]); Cconst_int 1]) ->
-      Cop(Cadda, [ptr; lsl_const c log2size])
-  | Cop(Caddi, [c; Cconst_int n]) ->
-      Cop(Cadda, [Cop(Cadda, [ptr; lsl_const c (log2size - 1)]);
-                   Cconst_int((n-1) lsl (log2size - 1))])
+      if i = 0 then ptr else mk(Cop(Cadda, [ptr; mk(Cconst_int(i lsl log2size))]))
+  | Cop(Caddi, [{exp=Cop(Clsl, [c; {exp=Cconst_int 1}])}; {exp=Cconst_int 1}]) ->
+      mk(Cop(Cadda, [ptr; lsl_const c log2size]))
+  | Cop(Caddi, [c; {exp=Cconst_int n}]) ->
+      mk(Cop(Cadda, [mk(Cop(Cadda, [ptr; lsl_const c (log2size - 1)]));
+                      mk(Cconst_int((n-1) lsl (log2size - 1)))]))
   | _ ->
-      Cop(Cadda, [Cop(Cadda, [ptr; lsl_const ofs (log2size - 1)]);
-                   Cconst_int((-1) lsl (log2size - 1))])
+      mk(Cop(Cadda, [mk(Cop(Cadda, [ptr; lsl_const ofs (log2size - 1)]));
+                      mk(Cconst_int((-1) lsl (log2size - 1)))]))
 
 let addr_array_ref arr ofs =
-  Cop(Cload Word, [array_indexing log2_size_addr arr ofs])
+  let mk = mkdbg arr.dbg in
+  mk(Cop(Cload Word, [array_indexing log2_size_addr arr ofs]))
 
 let unboxed_float_array_ref arr ofs =
-  Cop(Cload Double_u, [array_indexing log2_size_float arr ofs])
+  let mk = mkdbg arr.dbg in
+  mk(Cop(Cload Double_u, [array_indexing log2_size_float arr ofs]))
 
 let float_array_ref arr ofs =
   box_float(unboxed_float_array_ref arr ofs)
 
 let addr_array_set arr ofs newval =
-  Cop(Cextcall("caml_modify", typ_void, false, Debuginfo.none),
-      [array_indexing log2_size_addr arr ofs; newval])
+  let mk = mkdbg arr.dbg in
+  mk(Cop(Cextcall("caml_modify", typ_void, false),
+          [array_indexing log2_size_addr arr ofs; newval]))
 
 let int_array_set arr ofs newval =
-  Cop(Cstore Word, [array_indexing log2_size_addr arr ofs; newval])
+  let mk = mkdbg arr.dbg in
+  mk(Cop(Cstore Word, [array_indexing log2_size_addr arr ofs; newval]))
 
 let float_array_set arr ofs newval =
-  Cop(Cstore Double_u, [array_indexing log2_size_float arr ofs; newval])
+  let mk = mkdbg arr.dbg in
+  mk(Cop(Cstore Double_u, [array_indexing log2_size_float arr ofs; newval]))
 
 (* String length *)
 
 let string_length exp =
   bind "str" exp (fun str ->
     let tmp_var = Ident.create "tmp" in
-    Clet(tmp_var,
-         Cop(Csubi,
-             [Cop(Clsl,
-                   [Cop(Clsr, [header str; Cconst_int 10]);
-                     Cconst_int log2_size_addr]);
-              Cconst_int 1]),
-         Cop(Csubi,
-             [Cvar tmp_var;
-               Cop(Cload Byte_unsigned,
-                     [Cop(Cadda, [str; Cvar tmp_var])])])))
+    let mk = mkdbg exp.dbg in
+    mk(Clet(tmp_var,
+             mk(Cop(Csubi,
+                     [mk(Cop(Clsl,
+                              [mk(Cop(Clsr, [header str; mk(Cconst_int 10)]));
+                               mk(Cconst_int log2_size_addr)]));
+                      mk(Cconst_int 1)])),
+             mk(Cop(Csubi,
+                     [mk(Cvar tmp_var);
+                      mk(Cop(Cload Byte_unsigned,
+                              [mk(Cop(Cadda, [str; mk(Cvar tmp_var)]))]))])))))
 
 (* Message sending *)
 
 let lookup_tag obj tag =
   bind "tag" tag (fun tag ->
-    Cop(Cextcall("caml_get_public_method", typ_addr, false, Debuginfo.none),
-        [obj; tag]))
+    let mk = mkdbg obj.dbg in
+    mk(Cop(Cextcall("caml_get_public_method", typ_addr, false), [obj; tag])))
 
 let lookup_label obj lab =
   bind "lab" lab (fun lab ->
-    let table = Cop (Cload Word, [obj]) in
+    let mk = mkdbg obj.dbg in
+    let table = mk(Cop (Cload Word, [obj])) in
     addr_array_ref table lab)
 
 let call_cached_method obj tag cache pos args dbg =
   let arity = List.length args in
   let cache = array_indexing log2_size_addr cache pos in
+  let mk = mkdbg obj.dbg in
   Compilenv.need_send_fun arity;
-  Cop(Capply (typ_addr, dbg),
-      Cconst_symbol("caml_send" ^ string_of_int arity) ::
-      obj :: tag :: cache :: args)
+  mk(Cop(Capply (typ_addr),
+          mk(Cconst_symbol("caml_send" ^ string_of_int arity)) ::
+            obj :: tag :: cache :: args))
 
 (* Allocation *)
 
-let make_alloc_generic set_fn tag wordsize args =
+let make_alloc_generic set_fn tag wordsize args dbg =
+  let mk = mkdbg dbg in
   if wordsize <= Config.max_young_wosize then
-    Cop(Calloc, Cconst_natint(block_header tag wordsize) :: args)
+    mk(Cop(Calloc, mk(Cconst_natint(block_header tag wordsize)) :: args))
   else begin
     let id = Ident.create "alloc" in
     let rec fill_fields idx = function
-      [] -> Cvar id
-    | e1::el -> Csequence(set_fn (Cvar id) (Cconst_int idx) e1,
-                          fill_fields (idx + 2) el) in
-    Clet(id,
-         Cop(Cextcall("caml_alloc", typ_addr, true, Debuginfo.none),
-                 [Cconst_int wordsize; Cconst_int tag]),
-         fill_fields 1 args)
+      | []     -> mk(Cvar id)
+      | e1::el -> mk(Csequence(set_fn (mk(Cvar id)) (mk(Cconst_int idx)) e1,
+                                fill_fields (idx + 2) el)) in
+    mk(Clet(id,
+             mk(Cop(Cextcall("caml_alloc", typ_addr, true),
+                    [mk(Cconst_int wordsize); mk(Cconst_int tag)])),
+             fill_fields 1 args))
   end
 
-let make_alloc tag args =
-  make_alloc_generic addr_array_set tag (List.length args) args
-let make_float_alloc tag args =
+let make_alloc tag args dbg =
+  make_alloc_generic addr_array_set tag (List.length args) args dbg
+let make_float_alloc tag args dbg =
   make_alloc_generic float_array_set tag
-                     (List.length args * size_float / size_addr) args
+                     (List.length args * size_float / size_addr) args dbg
 
 (* To compile "let rec" over values *)
 
@@ -438,20 +505,22 @@ let new_const_symbol () =
 
 let structured_constants = ref ([] : (string * structured_constant) list)
 
-let transl_constant = function
+let transl_constant dbg c =
+  let mk = mkdbg dbg in
+  match c with
     Const_base(Const_int n) ->
-      int_const n
+      mk(int_const n)
   | Const_base(Const_char c) ->
-      Cconst_int(((Char.code c) lsl 1) + 1)
+      mk(Cconst_int (((Char.code c) lsl 1) + 1))
   | Const_pointer n ->
       if n <= max_repr_int && n >= min_repr_int
-      then Cconst_pointer((n lsl 1) + 1)
-      else Cconst_natpointer
-              (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n)
+      then mk(Cconst_pointer((n lsl 1) + 1))
+      else mk(Cconst_natpointer
+                        (Nativeint.add (Nativeint.shift_left (Nativeint.of_int n) 1) 1n))
   | cst ->
       let lbl = new_const_symbol() in
       structured_constants := (lbl, cst) :: !structured_constants;
-      Cconst_symbol lbl
+      mk(Cconst_symbol lbl)
 
 (* Translate constant closures *)
 
@@ -479,46 +548,50 @@ let alloc_header_boxed_int bi =
   | Pint64 -> alloc_boxedint64_header
 
 let box_int bi arg =
-  match arg with
+  let dbg = arg.dbg in
+  let mk = mkdbg dbg in
+  match arg.exp with
     Cconst_int n ->
-      transl_constant (box_int_constant bi (Nativeint.of_int n))
+      transl_constant dbg (box_int_constant bi (Nativeint.of_int n))
   | Cconst_natint n ->
-      transl_constant (box_int_constant bi n)
+      transl_constant dbg (box_int_constant bi n)
   | _ ->
       let arg' =
         if bi = Pint32 && size_int = 8 && big_endian
-        then Cop(Clsl, [arg; Cconst_int 32])
+        then mk(Cop(Clsl, [arg; mk(Cconst_int 32)]))
         else arg in
-      Cop(Calloc, [alloc_header_boxed_int bi;
-                   Cconst_symbol(operations_boxed_int bi);
-                   arg'])
+      mk(Cop(Calloc, [mk(alloc_header_boxed_int bi);
+                       mk(Cconst_symbol(operations_boxed_int bi));
+                       arg']))
 
 let rec unbox_int bi arg =
-  match arg with
-    Cop(Calloc, [hdr; ops; Cop(Clsl, [contents; Cconst_int 32])])
+  let mk = mkdbg arg.dbg in
+  match arg.exp with
+    Cop(Calloc, [hdr; ops; {exp=Cop(Clsl, [contents; {exp=Cconst_int 32}])}])
     when bi = Pint32 && size_int = 8 && big_endian ->
       (* Force sign-extension of low 32 bits *)
-      Cop(Casr, [Cop(Clsl, [contents; Cconst_int 32]); Cconst_int 32])
+      mk(Cop(Casr, [mk(Cop(Clsl, [contents; mk(Cconst_int 32)])); mk(Cconst_int 32)]))
   | Cop(Calloc, [hdr; ops; contents])
     when bi = Pint32 && size_int = 8 && not big_endian ->
       (* Force sign-extension of low 32 bits *)
-      Cop(Casr, [Cop(Clsl, [contents; Cconst_int 32]); Cconst_int 32])
+      mk(Cop(Casr, [mk(Cop(Clsl, [contents; mk(Cconst_int 32)])); mk(Cconst_int 32)]))
   | Cop(Calloc, [hdr; ops; contents]) ->
       contents
-  | Clet(id, exp, body) -> Clet(id, exp, unbox_int bi body)
+  | Clet(id, exp, body) -> mk(Clet(id, exp, unbox_int bi body))
   | Cifthenelse(cond, e1, e2) ->
-      Cifthenelse(cond, unbox_int bi e1, unbox_int bi e2)
-  | Csequence(e1, e2) -> Csequence(e1, unbox_int bi e2)
-  | Cswitch(e, tbl, el) -> Cswitch(e, tbl, Array.map (unbox_int bi) el)
-  | Ccatch(n, ids, e1, e2) -> Ccatch(n, ids, unbox_int bi e1, unbox_int bi e2)
-  | Ctrywith(e1, id, e2) -> Ctrywith(unbox_int bi e1, id, unbox_int bi e2)
+      mk(Cifthenelse(cond, unbox_int bi e1, unbox_int bi e2))
+  | Csequence(e1, e2) -> mk(Csequence(e1, unbox_int bi e2))
+  | Cswitch(e, tbl, el) -> mk(Cswitch(e, tbl, Array.map (unbox_int bi) el))
+  | Ccatch(n, ids, e1, e2) -> mk(Ccatch(n, ids, unbox_int bi e1, unbox_int bi e2))
+  | Ctrywith(e1, id, e2) -> mk(Ctrywith(unbox_int bi e1, id, unbox_int bi e2))
   | _ ->
-      Cop(Cload(if bi = Pint32 then Thirtytwo_signed else Word),
-          [Cop(Cadda, [arg; Cconst_int size_addr])])
+      mk(Cop(Cload(if bi = Pint32 then Thirtytwo_signed else Word),
+              [mk(Cop(Cadda, [arg; mk(Cconst_int size_addr)]))]))
 
 let make_unsigned_int bi arg =
+  let mk = mkdbg arg.dbg in
   if bi = Pint32 && size_int = 8
-  then Cop(Cand, [arg; Cconst_natint 0xFFFFFFFFn])
+  then mk(Cop(Cand, [arg; mk(Cconst_natint 0xFFFFFFFFn)]))
   else arg
 
 (* Big arrays *)
@@ -539,19 +612,21 @@ let bigarray_elt_size = function
   | Pbigarray_complex64 -> 16
 
 let bigarray_indexing unsafe elt_kind layout b args dbg =
+  let mk = mkdbg dbg in
   let check_bound a1 a2 k =
-    if unsafe then k else Csequence(Cop(Ccheckbound dbg, [a1;a2]), k) in
+    if unsafe then k else
+      mk(Csequence(mk(Cop(Ccheckbound, [a1;a2])), k)) in
   let rec ba_indexing dim_ofs delta_ofs = function
     [] -> assert false
   | [arg] ->
       bind "idx" (untag_int arg)
         (fun idx ->
-           check_bound (Cop(Cload Word,[field_address b dim_ofs])) idx idx)
+          check_bound (mk(Cop(Cload Word,[field_address b dim_ofs]))) idx idx)
   | arg1 :: argl ->
       let rem = ba_indexing (dim_ofs + delta_ofs) delta_ofs argl in
       bind "idx" (untag_int arg1)
         (fun idx ->
-          bind "bound" (Cop(Cload Word, [field_address b dim_ofs]))
+          bind "bound" (mk(Cop(Cload Word, [field_address b dim_ofs])))
           (fun bound ->
             check_bound bound idx (add_int (mul_int rem bound) idx))) in
   let offset =
@@ -561,14 +636,14 @@ let bigarray_indexing unsafe elt_kind layout b args dbg =
     | Pbigarray_c_layout ->
         ba_indexing (4 + List.length args) (-1) (List.rev args)
     | Pbigarray_fortran_layout ->
-        ba_indexing 5 1 (List.map (fun idx -> sub_int idx (Cconst_int 2)) args)
+        ba_indexing 5 1 (List.map (fun idx -> sub_int idx (mk(Cconst_int 2))) args)
   and elt_size =
     bigarray_elt_size elt_kind in
   let byte_offset =
     if elt_size = 1
     then offset
-    else Cop(Clsl, [offset; Cconst_int(log2 elt_size)]) in
-  Cop(Cadda, [Cop(Cload Word, [field_address b 1]); byte_offset])
+    else mk(Cop(Clsl, [offset; mk(Cconst_int(log2 elt_size))])) in
+  mk(Cop(Cadda, [mk(Cop(Cload Word, [field_address b 1])); byte_offset]))
 
 let bigarray_word_kind = function
     Pbigarray_unknown -> assert false
@@ -586,6 +661,7 @@ let bigarray_word_kind = function
   | Pbigarray_complex64 -> Double
 
 let bigarray_get unsafe elt_kind layout b args dbg =
+  let mk = mkdbg dbg in
   bind "ba" b (fun b ->
     match elt_kind with
       Pbigarray_complex32 | Pbigarray_complex64 ->
@@ -593,13 +669,14 @@ let bigarray_get unsafe elt_kind layout b args dbg =
         let sz = bigarray_elt_size elt_kind / 2 in
         bind "addr" (bigarray_indexing unsafe elt_kind layout b args dbg) (fun addr ->
           box_complex
-            (Cop(Cload kind, [addr]))
-            (Cop(Cload kind, [Cop(Cadda, [addr; Cconst_int sz])])))
+            (mk(Cop(Cload kind, [addr])))
+            (mk(Cop(Cload kind, [mk(Cop(Cadda, [addr; mk(Cconst_int sz)]))]))))
     | _ ->
-        Cop(Cload (bigarray_word_kind elt_kind),
-            [bigarray_indexing unsafe elt_kind layout b args dbg]))
+        mk(Cop(Cload (bigarray_word_kind elt_kind),
+                [bigarray_indexing unsafe elt_kind layout b args dbg])))
 
 let bigarray_set unsafe elt_kind layout b args newval dbg =
+  let mk = mkdbg dbg in
   bind "ba" b (fun b ->
     match elt_kind with
       Pbigarray_complex32 | Pbigarray_complex64 ->
@@ -607,13 +684,13 @@ let bigarray_set unsafe elt_kind layout b args newval dbg =
         let sz = bigarray_elt_size elt_kind / 2 in
         bind "newval" newval (fun newv ->
         bind "addr" (bigarray_indexing unsafe elt_kind layout b args dbg) (fun addr ->
-          Csequence(
-            Cop(Cstore kind, [addr; complex_re newv]),
-            Cop(Cstore kind,
-                [Cop(Cadda, [addr; Cconst_int sz]); complex_im newv]))))
+          mk(Csequence(
+            mk(Cop(Cstore kind, [addr; complex_re newv])),
+            mk(Cop(Cstore kind,
+                [mk(Cop(Cadda, [addr; mk(Cconst_int sz)])); complex_im newv]))))))
     | _ ->
-        Cop(Cstore (bigarray_word_kind elt_kind),
-            [bigarray_indexing unsafe elt_kind layout b args dbg; newval]))
+        mk(Cop(Cstore (bigarray_word_kind elt_kind),
+            [bigarray_indexing unsafe elt_kind layout b args dbg; newval])))
 
 (* Simplification of some primitives into C calls *)
 
@@ -673,7 +750,9 @@ let simplif_primitive p =
 
 (* constants first *)
 
-let transl_isout h arg = tag_int (Cop(Ccmpa Clt, [h ; arg]))
+let transl_isout h arg =
+  let mk = mkdbg arg.dbg in
+  tag_int (mk(Cop(Ccmpa Clt, [h ; arg])))
 
 exception Found of int
 
@@ -688,11 +767,12 @@ let make_switch_gen arg cases acts =
     new_cases.(i) <- new_act
   done ;
 
-  Cswitch
+  let mk = mkdbg arg.dbg in
+  mk(Cswitch
     (arg, new_cases,
      Array.map
        (fun n -> acts.(n))
-       (store.Switch.act_get ()))
+       (store.Switch.act_get ())))
 
 
 (* Then for blocks *)
@@ -710,12 +790,12 @@ struct
 
   type act = expression
 
-  let default = Cexit (0,[])
-  let make_prim p args = Cop (p,args)
+  let default = mk(Cexit (0,[]))
+  let make_prim p args = mk(Cop (p,args))
   let make_offset arg n = add_const arg n
-  let make_isout h arg =  Cop (Ccmpa Clt, [h ; arg])
-  let make_isin h arg =  Cop (Ccmpa Cge, [h ; arg])
-  let make_if cond ifso ifnot = Cifthenelse (cond, ifso, ifnot)
+  let make_isout h arg =  mkdbg arg.dbg (Cop (Ccmpa Clt, [h ; arg]))
+  let make_isin h arg =  mkdbg arg.dbg (Cop (Ccmpa Cge, [h ; arg]))
+  let make_if cond ifso ifnot = mkdbg cond.dbg (Cifthenelse (cond, ifso, ifnot))
   let make_switch arg cases actions =
     make_switch_gen arg cases actions
   let bind arg body = bind "switcher" arg body
@@ -732,8 +812,7 @@ type unboxed_number_kind =
   | Boxed_float
   | Boxed_integer of boxed_integer
 
-let is_unboxed_number ulam =
-  match ulam.exp with
+let is_unboxed_number ulam = match ulam.exp with
     Uconst(Const_base(Const_float f)) ->
       Boxed_float
   | Uprim(p, _) ->
@@ -775,31 +854,33 @@ let is_unboxed_number ulam =
 let subst_boxed_number unbox_fn boxed_id unboxed_id exp =
   let need_boxed = ref false in
   let assigned = ref false in
-  let rec subst = function
-      Cvar id as e ->
-        if Ident.same id boxed_id then need_boxed := true; e
-    | Clet(id, arg, body) -> Clet(id, subst arg, subst body)
+  let rec subst c =
+    let mk = mkdbg c.dbg in
+    match c.exp with
+      Cvar id ->
+        if Ident.same id boxed_id then need_boxed := true; c
+    | Clet(id, arg, body) -> mk(Clet(id, subst arg, subst body))
     | Cassign(id, arg) ->
         if Ident.same id boxed_id then begin
           assigned := true;
-          Cassign(unboxed_id, subst(unbox_fn arg))
+          mk(Cassign(unboxed_id, subst(unbox_fn arg)))
         end else
-          Cassign(id, subst arg)
-    | Ctuple argv -> Ctuple(List.map subst argv)
-    | Cop(Cload _, [Cvar id]) as e ->
-        if Ident.same id boxed_id then Cvar unboxed_id else e
-    | Cop(Cload _, [Cop(Cadda, [Cvar id; _])]) as e ->
-        if Ident.same id boxed_id then Cvar unboxed_id else e
-    | Cop(op, argv) -> Cop(op, List.map subst argv)
-    | Csequence(e1, e2) -> Csequence(subst e1, subst e2)
-    | Cifthenelse(e1, e2, e3) -> Cifthenelse(subst e1, subst e2, subst e3)
+          mk(Cassign(id, subst arg))
+    | Ctuple argv -> mk(Ctuple(List.map subst argv))
+    | Cop(Cload _, [{exp=Cvar id}]) ->
+        if Ident.same id boxed_id then mk(Cvar unboxed_id) else c
+    | Cop(Cload _, [{exp=Cop(Cadda, [{exp=Cvar id}; _])}]) ->
+        if Ident.same id boxed_id then mk(Cvar unboxed_id) else c
+    | Cop(op, argv) -> mk(Cop(op, List.map subst argv))
+    | Csequence(e1, e2) -> mk(Csequence(subst e1, subst e2))
+    | Cifthenelse(e1, e2, e3) -> mk(Cifthenelse(subst e1, subst e2, subst e3))
     | Cswitch(arg, index, cases) ->
-        Cswitch(subst arg, index, Array.map subst cases)
-    | Cloop e -> Cloop(subst e)
-    | Ccatch(nfail, ids, e1, e2) -> Ccatch(nfail, ids, subst e1, subst e2)
-    | Cexit (nfail, el) -> Cexit (nfail, List.map subst el)
-    | Ctrywith(e1, id, e2) -> Ctrywith(subst e1, id, subst e2)
-    | e -> e in
+        mk(Cswitch(subst arg, index, Array.map subst cases))
+    | Cloop e -> mk(Cloop(subst e))
+    | Ccatch(nfail, ids, e1, e2) -> mk(Ccatch(nfail, ids, subst e1, subst e2))
+    | Cexit (nfail, el) -> mk(Cexit (nfail, List.map subst el))
+    | Ctrywith(e1, id, e2) -> mk(Ctrywith(subst e1, id, subst e2))
+    | _ -> c in
   let res = subst exp in
   (res, !need_boxed, !assigned)
 
@@ -812,14 +893,14 @@ let rec transl ulam =
   let mk = mkdbg dbg in
   match ulam.exp with
     Uvar id ->
-      Cvar id
+      mk(Cvar id)
   | Uconst sc ->
-      transl_constant sc
+      transl_constant dbg sc
   | Uclosure(fundecls, []) ->
       let lbl = new_const_symbol() in
       constant_closures := (lbl, fundecls) :: !constant_closures;
       List.iter (fun f -> Queue.add f functions) fundecls;
-      Cconst_symbol lbl
+      mk(Cconst_symbol lbl)
   | Uclosure(fundecls, clos_vars) ->
       let block_size =
         fundecls_size fundecls + List.length clos_vars in
@@ -828,43 +909,44 @@ let rec transl ulam =
             List.map transl clos_vars
         | f :: rem ->
             Queue.add f functions;
+            let mk = mkdbg f.Clambda.dbg in
             let header =
               if pos = 0
-              then alloc_closure_header block_size
-              else alloc_infix_header pos in
+              then mk(alloc_closure_header block_size)
+              else mk(alloc_infix_header pos) in
             if f.arity = 1 then
               header ::
-              Cconst_symbol f.label ::
-              int_const 1 ::
+              mk(Cconst_symbol f.label) ::
+              mk(int_const 1) ::
               transl_fundecls (pos + 3) rem
             else
               header ::
-              Cconst_symbol(curry_function f.arity) ::
-              int_const f.arity ::
-              Cconst_symbol f.label ::
+              mk(Cconst_symbol(curry_function f.arity)) ::
+              mk(int_const f.arity) ::
+              mk(Cconst_symbol f.label) ::
               transl_fundecls (pos + 4) rem in
-      Cop(Calloc, transl_fundecls 0 fundecls)
+      mk(Cop(Calloc, transl_fundecls 0 fundecls))
   | Uoffset(arg, offset) ->
       field_address (transl arg) offset
   | Udirect_apply(lbl, args) ->
-      Cop(Capply(typ_addr, dbg), Cconst_symbol lbl :: List.map transl args)
+      mk(Cop(Capply(typ_addr), mk(Cconst_symbol lbl) :: List.map transl args))
   | Ugeneric_apply(clos, [arg]) ->
       bind "fun" (transl clos) (fun clos ->
-        Cop(Capply(typ_addr, dbg), [get_field clos 0; transl arg; clos]))
+        mk(Cop(Capply(typ_addr), [get_field clos 0; transl arg; clos])))
   | Ugeneric_apply(clos, args) ->
       let arity = List.length args in
-      let cargs = Cconst_symbol(apply_function arity) ::
+      let cargs = mk(Cconst_symbol(apply_function arity)) ::
         List.map transl (args @ [clos]) in
-      Cop(Capply(typ_addr, dbg), cargs)
+      mk(Cop(Capply typ_addr, cargs))
   | Usend(kind, met, obj, args) ->
       let call_met obj args clos =
         if args = [] then
-          Cop(Capply(typ_addr, dbg), [get_field clos 0;obj;clos])
+          mk(Cop(Capply typ_addr, [get_field clos 0;obj;clos]))
         else
           let arity = List.length args + 1 in
-          let cargs = Cconst_symbol(apply_function arity) :: obj ::
+          let cargs = mk(Cconst_symbol(apply_function arity)) :: obj ::
             (List.map transl args) @ [clos] in
-          Cop(Capply(typ_addr, dbg), cargs)
+          mk(Cop(Capply typ_addr, cargs))
       in
       bind "obj" (transl obj) (fun obj ->
         match kind, args with
@@ -878,7 +960,7 @@ let rec transl ulam =
   | Ulet(id, exp, body) ->
       begin match is_unboxed_number exp with
         No_unboxing ->
-          Clet(id, transl exp, transl body)
+          mk(Clet(id, transl exp, transl body))
       | Boxed_float ->
           transl_unbox_let box_float unbox_float transl_unbox_float
                            id exp body
@@ -893,31 +975,31 @@ let rec transl ulam =
   | Uprim(prim, args) ->
       begin match (simplif_primitive prim, args) with
         (Pgetglobal id, []) ->
-          Cconst_symbol (Ident.name id)
+          mk(Cconst_symbol (Ident.name id))
       | (Pmakeblock(tag, mut), []) ->
-          transl_constant(Const_block(tag, []))
+          transl_constant dbg (Const_block(tag, []))
       | (Pmakeblock(tag, mut), args) ->
-          make_alloc tag (List.map transl args)
+          make_alloc tag (List.map transl args) dbg
       | (Pccall prim, args) ->
           if prim.prim_native_float then
             box_float
-              (Cop(Cextcall(prim.prim_native_name, typ_float, false, dbg),
-                   List.map transl_unbox_float args))
+              (mk(Cop(Cextcall(prim.prim_native_name, typ_float, false),
+                      List.map transl_unbox_float args)))
           else
-            Cop(Cextcall(Primitive.native_name prim, typ_addr, prim.prim_alloc, dbg),
-                List.map transl args)
+            mk(Cop(Cextcall(Primitive.native_name prim, typ_addr, prim.prim_alloc),
+                   List.map transl args))
       | (Pmakearray kind, []) ->
-          transl_constant(Const_block(0, []))
+          transl_constant dbg (Const_block(0, []))
       | (Pmakearray kind, args) ->
           begin match kind with
             Pgenarray ->
-              Cop(Cextcall("caml_make_array", typ_addr, true, Debuginfo.none),
-                  [make_alloc 0 (List.map transl args)])
+              mk(Cop(Cextcall("caml_make_array", typ_addr, true),
+                     [make_alloc 0 (List.map transl args) dbg]))
           | Paddrarray | Pintarray ->
-              make_alloc 0 (List.map transl args)
+              make_alloc 0 (List.map transl args) dbg
           | Pfloatarray ->
               make_float_alloc Obj.double_array_tag
-                              (List.map transl_unbox_float args)
+                (List.map transl_unbox_float args) dbg
           end
       | (Pbigarrayref(unsafe, num_dims, elt_kind, layout), arg1 :: argl) ->
           let elt =
@@ -961,31 +1043,31 @@ let rec transl ulam =
       (* As in the bytecode interpreter, only matching against constants
          can be checked *)
       if Array.length s.us_index_blocks = 0 then
-        Cswitch
+        mk(Cswitch
           (untag_int (transl arg),
            s.us_index_consts,
-           Array.map transl s.us_actions_consts)
+           Array.map transl s.us_actions_consts))
       else if Array.length s.us_index_consts = 0 then
         transl_switch (get_tag (transl arg))
           s.us_index_blocks s.us_actions_blocks
       else
         bind "switch" (transl arg) (fun arg ->
-          Cifthenelse(
-          Cop(Cand, [arg; Cconst_int 1]),
-          transl_switch
-            (untag_int arg) s.us_index_consts s.us_actions_consts,
-          transl_switch
-            (get_tag arg) s.us_index_blocks s.us_actions_blocks))
+          mk(Cifthenelse(
+            mk(Cop(Cand, [arg; mk(Cconst_int 1)])),
+            transl_switch
+              (untag_int arg) s.us_index_consts s.us_actions_consts,
+            transl_switch
+              (get_tag arg) s.us_index_blocks s.us_actions_blocks)))
   | Ustaticfail (nfail, args) ->
-      Cexit (nfail, List.map transl args)
+      mk(Cexit (nfail, List.map transl args))
   | Ucatch(nfail, [], body, handler) ->
       make_catch nfail (transl body) (transl handler)
   | Ucatch(nfail, ids, body, handler) ->
-      Ccatch(nfail, ids, transl body, transl handler)
+      mk(Ccatch(nfail, ids, transl body, transl handler))
   | Utrywith(body, exn, handler) ->
-      Ctrywith(transl body, exn, transl handler)
-  | Uifthenelse({exp=Uprim(Pnot, [arg])}, ifso, ifnot) ->
-      transl (mk(Uifthenelse(arg, ifnot, ifso)))
+      mk(Ctrywith(transl body, exn, transl handler))
+  | Uifthenelse({exp=Uprim(Pnot, [arg])} as ul, ifso, ifnot) ->
+      transl {ul with exp=Uifthenelse(arg, ifnot, ifso)}
   | Uifthenelse(cond, ifso, {exp=Ustaticfail (nfail, [])}) ->
       exit_if_false cond (transl ifso) nfail
   | Uifthenelse(cond, {exp=Ustaticfail (nfail, [])}, ifnot) ->
@@ -1008,51 +1090,56 @@ let rec transl ulam =
         num_true
         (make_catch2
            (fun shared_false ->
-             Cifthenelse
-               (test_bool (transl cond),
-                exit_if_true condso num_true shared_false,
-                exit_if_true condnot num_true shared_false))
+             mk(Cifthenelse
+                  (test_bool (transl cond),
+                   exit_if_true condso num_true shared_false,
+                   exit_if_true condnot num_true shared_false)))
            (transl ifnot))
         (transl ifso)
   | Uifthenelse(cond, ifso, ifnot) ->
-      Cifthenelse(test_bool(transl cond), transl ifso, transl ifnot)
+      mk(Cifthenelse(test_bool(transl cond), transl ifso, transl ifnot))
   | Usequence(exp1, exp2) ->
-      Csequence(remove_unit(transl exp1), transl exp2)
+      mk(Csequence(remove_unit(transl exp1), transl exp2))
   | Uwhile(cond, body) ->
       let raise_num = next_raise_count () in
       return_unit
-        (Ccatch
+        (mk(Ccatch
            (raise_num, [],
-            Cloop(exit_if_false cond (remove_unit(transl body)) raise_num),
-            Ctuple []))
+            mk(Cloop(exit_if_false cond (remove_unit(transl body)) raise_num)),
+            mk(Ctuple []))))
   | Ufor(id, low, high, dir, body) ->
       let tst = match dir with Upto -> Cgt   | Downto -> Clt in
       let inc = match dir with Upto -> Caddi | Downto -> Csubi in
       let raise_num = next_raise_count () in
       let id_prev = Ident.rename id in
       return_unit
-        (Clet
-           (id, transl low,
-            bind_nonvar "bound" (transl high) (fun high ->
-              Ccatch
-                (raise_num, [],
-                 Cifthenelse
-                   (Cop(Ccmpi tst, [Cvar id; high]), Cexit (raise_num, []),
-                    Cloop
-                      (Csequence
-                         (remove_unit(transl body),
-                         Clet(id_prev, Cvar id,
-                          Csequence
-                            (Cassign(id,
-                               Cop(inc, [Cvar id; Cconst_int 2])),
-                             Cifthenelse
-                               (Cop(Ccmpi Ceq, [Cvar id_prev; high]),
-                                Cexit (raise_num,[]), Ctuple [])))))),
-                 Ctuple []))))
+        (mk(Clet
+          (id, transl low,
+           bind_nonvar "bound" (transl high) (fun high ->
+             mk(Ccatch
+               (raise_num, [],
+                mk(Cifthenelse
+                  (mk(Cop(Ccmpi tst, [mk(Cvar id); high])), mk(Cexit (raise_num, [])),
+                   mk(Cloop
+                     (mk(Csequence
+                        (remove_unit(transl body),
+                         mk(Clet
+                           (id_prev,
+                            mk(Cvar id),
+                            mk(Csequence
+                              (mk(Cassign
+                                 (id,
+                                  mk(Cop(inc, [mk(Cvar id); mk(Cconst_int 2)])))),
+                               mk(Cifthenelse
+                                 (mk(Cop(Ccmpi Ceq, [mk(Cvar id_prev); high])),
+                                  mk(Cexit (raise_num,[])),
+                                  mk(Ctuple []))))))))))))),
+                mk(Ctuple [])))))))
   | Uassign(id, exp) ->
-      return_unit(Cassign(id, transl exp))
+      return_unit(mk(Cassign(id, transl exp)))
 
 and transl_prim_1 p arg dbg =
+  let mk = mkdbg dbg in
   match p with
   (* Generic operations *)
     Pidentity ->
@@ -1065,34 +1152,34 @@ and transl_prim_1 p arg dbg =
   | Pfloatfield n ->
       let ptr = transl arg in
       box_float(
-        Cop(Cload Double_u,
+        mk(Cop(Cload Double_u,
             [if n = 0 then ptr
-                       else Cop(Cadda, [ptr; Cconst_int(n * size_float)])]))
+               else mk(Cop(Cadda, [ptr; mk(Cconst_int(n * size_float))]))])))
   (* Exceptions *)
   | Praise ->
-      Cop(Craise dbg, [transl arg])
+      mk(Cop(Craise, [transl arg]))
   (* Integer operations *)
   | Pnegint ->
-      Cop(Csubi, [Cconst_int 2; transl arg])
+      mk(Cop(Csubi, [mk(Cconst_int 2); transl arg]))
   | Poffsetint n ->
       if no_overflow_lsl n then
         add_const (transl arg) (n lsl 1)
       else
-        transl_prim_2 Paddint arg (mk(Uconst (Const_base(Const_int n)))) Debuginfo.none
+        transl_prim_2 Paddint arg (mkdbg dbg (Uconst (Const_base(Const_int n)))) dbg
   | Poffsetref n ->
       return_unit
         (bind "ref" (transl arg) (fun arg ->
-          Cop(Cstore Word,
-              [arg; add_const (Cop(Cload Word, [arg])) (n lsl 1)])))
+          mk(Cop(Cstore Word,
+              [arg; add_const (mk(Cop(Cload Word, [arg]))) (n lsl 1)]))))
   (* Floating-point operations *)
   | Pfloatofint ->
-      box_float(Cop(Cfloatofint, [untag_int(transl arg)]))
+      box_float(mk(Cop(Cfloatofint, [untag_int(transl arg)])))
   | Pintoffloat ->
-     tag_int(Cop(Cintoffloat, [transl_unbox_float arg]))
+     tag_int(mk(Cop(Cintoffloat, [transl_unbox_float arg])))
   | Pnegfloat ->
-      box_float(Cop(Cnegf, [transl_unbox_float arg]))
+      box_float(mk(Cop(Cnegf, [transl_unbox_float arg])))
   | Pabsfloat ->
-      box_float(Cop(Cabsf, [transl_unbox_float arg]))
+      box_float(mk(Cop(Cabsf, [transl_unbox_float arg])))
   (* String operations *)
   | Pstringlength ->
       tag_int(string_length (transl arg))
@@ -1102,24 +1189,24 @@ and transl_prim_1 p arg dbg =
         Pgenarray ->
           let len =
             if wordsize_shift = numfloat_shift then
-              Cop(Clsr, [header(transl arg); Cconst_int wordsize_shift])
+              mk(Cop(Clsr, [header(transl arg); mk(Cconst_int wordsize_shift)]))
             else
               bind "header" (header(transl arg)) (fun hdr ->
-                Cifthenelse(is_addr_array_hdr hdr,
-                            Cop(Clsr, [hdr; Cconst_int wordsize_shift]),
-                            Cop(Clsr, [hdr; Cconst_int numfloat_shift]))) in
-          Cop(Cor, [len; Cconst_int 1])
+                mk(Cifthenelse(is_addr_array_hdr hdr,
+                            mk(Cop(Clsr, [hdr; mk(Cconst_int wordsize_shift)])),
+                            mk(Cop(Clsr, [hdr; mk(Cconst_int numfloat_shift)]))))) in
+          mk(Cop(Cor, [len; mk(Cconst_int 1)]))
       | Paddrarray | Pintarray ->
-          Cop(Cor, [addr_array_length(header(transl arg)); Cconst_int 1])
+          mk(Cop(Cor, [addr_array_length(header(transl arg)); mk(Cconst_int 1)]))
       | Pfloatarray ->
-          Cop(Cor, [float_array_length(header(transl arg)); Cconst_int 1])
+          mk(Cop(Cor, [float_array_length(header(transl arg)); mk(Cconst_int 1)]))
       end
   (* Boolean operations *)
   | Pnot ->
-      Cop(Csubi, [Cconst_int 4; transl arg]) (* 1 -> 3, 3 -> 1 *)
+      mk(Cop(Csubi, [mk(Cconst_int 4); transl arg])) (* 1 -> 3, 3 -> 1 *)
   (* Test integer/block *)
   | Pisint ->
-      tag_int(Cop(Cand, [transl arg; Cconst_int 1]))
+      tag_int(mk(Cop(Cand, [transl arg; mk(Cconst_int 1)])))
   (* Boxed integers *)
   | Pbintofint bi ->
       box_int bi (untag_int (transl arg))
@@ -1128,35 +1215,36 @@ and transl_prim_1 p arg dbg =
   | Pcvtbint(bi1, bi2) ->
       box_int bi2 (transl_unbox_int bi1 arg)
   | Pnegbint bi ->
-      box_int bi (Cop(Csubi, [Cconst_int 0; transl_unbox_int bi arg]))
+      box_int bi (mk(Cop(Csubi, [mk(Cconst_int 0); transl_unbox_int bi arg])))
   | _ ->
       fatal_error "Cmmgen.transl_prim_1"
 
 and transl_prim_2 p arg1 arg2 dbg =
+  let mk = mkdbg dbg in
   match p with
   (* Heap operations *)
     Psetfield(n, ptr) ->
       if ptr then
-        return_unit(Cop(Cextcall("caml_modify", typ_void, false, Debuginfo.none),
-                        [field_address (transl arg1) n; transl arg2]))
+        return_unit(mk(Cop(Cextcall("caml_modify", typ_void, false),
+                           [field_address (transl arg1) n; transl arg2])))
       else
         return_unit(set_field (transl arg1) n (transl arg2))
   | Psetfloatfield n ->
       let ptr = transl arg1 in
       return_unit(
-        Cop(Cstore Double_u,
+        mk(Cop(Cstore Double_u,
             [if n = 0 then ptr
-                       else Cop(Cadda, [ptr; Cconst_int(n * size_float)]);
-                   transl_unbox_float arg2]))
+                       else mk(Cop(Cadda, [ptr; mk(Cconst_int(n * size_float))]));
+                   transl_unbox_float arg2])))
 
   (* Boolean operations *)
   | Psequand ->
-      Cifthenelse(test_bool(transl arg1), transl arg2, Cconst_int 1)
+      mk(Cifthenelse(test_bool(transl arg1), transl arg2, mk(Cconst_int 1)))
       (* let id = Ident.create "res1" in
       Clet(id, transl arg1,
            Cifthenelse(test_bool(Cvar id), transl arg2, Cvar id)) *)
   | Psequor ->
-      Cifthenelse(test_bool(transl arg1), Cconst_int 3, transl arg2)
+      mk(Cifthenelse(test_bool(transl arg1), mk(Cconst_int 3), transl arg2))
 
   (* Integer operations *)
   | Paddint ->
@@ -1164,59 +1252,59 @@ and transl_prim_2 p arg1 arg2 dbg =
   | Psubint ->
       incr_int(sub_int (transl arg1) (transl arg2))
   | Pmulint ->
-      incr_int(Cop(Cmuli, [decr_int(transl arg1); untag_int(transl arg2)]))
+      incr_int(mk(Cop(Cmuli, [decr_int(transl arg1); untag_int(transl arg2)])))
   | Pdivint ->
       tag_int(safe_divmod Cdivi (untag_int(transl arg1)) (untag_int(transl arg2)) dbg)
   | Pmodint ->
       tag_int(safe_divmod Cmodi (untag_int(transl arg1)) (untag_int(transl arg2)) dbg)
   | Pandint ->
-      Cop(Cand, [transl arg1; transl arg2])
+      mk(Cop(Cand, [transl arg1; transl arg2]))
   | Porint ->
-      Cop(Cor, [transl arg1; transl arg2])
+      mk(Cop(Cor, [transl arg1; transl arg2]))
   | Pxorint ->
-      Cop(Cor, [Cop(Cxor, [ignore_low_bit_int(transl arg1);
-                           ignore_low_bit_int(transl arg2)]);
-                Cconst_int 1])
+      mk(Cop(Cor, [mk(Cop(Cxor, [ignore_low_bit_int(transl arg1);
+                                 ignore_low_bit_int(transl arg2)]));
+                   mk(Cconst_int 1)]))
   | Plslint ->
       incr_int(lsl_int (decr_int(transl arg1)) (untag_int(transl arg2)))
   | Plsrint ->
-      Cop(Cor, [Cop(Clsr, [transl arg1; untag_int(transl arg2)]);
-                Cconst_int 1])
+    mk(Cop(Cor, [mk(Cop(Clsr, [transl arg1; untag_int(transl arg2)]));
+                 mk(Cconst_int 1)]))
   | Pasrint ->
-      Cop(Cor, [Cop(Casr, [transl arg1; untag_int(transl arg2)]);
-                Cconst_int 1])
+    mk(Cop(Cor, [mk(Cop(Casr, [transl arg1; untag_int(transl arg2)]));
+                 mk(Cconst_int 1)]))
   | Pintcomp cmp ->
-      tag_int(Cop(Ccmpi(transl_comparison cmp), [transl arg1; transl arg2]))
+      tag_int(mk(Cop(Ccmpi(transl_comparison cmp), [transl arg1; transl arg2])))
   | Pisout ->
       transl_isout (transl arg1) (transl arg2)
   (* Float operations *)
   | Paddfloat ->
-      box_float(Cop(Caddf,
-                    [transl_unbox_float arg1; transl_unbox_float arg2]))
+      box_float(mk(Cop(Caddf,
+                       [transl_unbox_float arg1; transl_unbox_float arg2])))
   | Psubfloat ->
-      box_float(Cop(Csubf,
-                    [transl_unbox_float arg1; transl_unbox_float arg2]))
+      box_float(mk(Cop(Csubf,
+                       [transl_unbox_float arg1; transl_unbox_float arg2])))
   | Pmulfloat ->
-      box_float(Cop(Cmulf,
-                    [transl_unbox_float arg1; transl_unbox_float arg2]))
+      box_float(mk(Cop(Cmulf,
+                       [transl_unbox_float arg1; transl_unbox_float arg2])))
   | Pdivfloat ->
-      box_float(Cop(Cdivf,
-                    [transl_unbox_float arg1; transl_unbox_float arg2]))
+      box_float(mk(Cop(Cdivf,
+                       [transl_unbox_float arg1; transl_unbox_float arg2])))
   | Pfloatcomp cmp ->
-      tag_int(Cop(Ccmpf(transl_comparison cmp),
-                  [transl_unbox_float arg1; transl_unbox_float arg2]))
+      tag_int(mk(Cop(Ccmpf(transl_comparison cmp),
+                     [transl_unbox_float arg1; transl_unbox_float arg2])))
 
   (* String operations *)
   | Pstringrefu ->
-      tag_int(Cop(Cload Byte_unsigned,
-                  [add_int (transl arg1) (untag_int(transl arg2))]))
+      tag_int(mk(Cop(Cload Byte_unsigned,
+                     [add_int (transl arg1) (untag_int(transl arg2))])))
   | Pstringrefs ->
       tag_int
         (bind "str" (transl arg1) (fun str ->
           bind "index" (untag_int (transl arg2)) (fun idx ->
-            Csequence(
-              Cop(Ccheckbound dbg, [string_length str; idx]),
-              Cop(Cload Byte_unsigned, [add_int str idx])))))
+            mk(Csequence(
+              mk(Cop(Ccheckbound, [string_length str; idx])),
+              mk(Cop(Cload Byte_unsigned, [add_int str idx])))))))
 
   (* Array operations *)
   | Parrayrefu kind ->
@@ -1224,9 +1312,9 @@ and transl_prim_2 p arg1 arg2 dbg =
         Pgenarray ->
           bind "arr" (transl arg1) (fun arr ->
             bind "index" (transl arg2) (fun idx ->
-              Cifthenelse(is_addr_array_ptr arr,
-                          addr_array_ref arr idx,
-                          float_array_ref arr idx)))
+              mk(Cifthenelse(is_addr_array_ptr arr,
+                             addr_array_ref arr idx,
+                             float_array_ref arr idx))))
       | Paddrarray | Pintarray ->
           addr_array_ref (transl arg1) (transl arg2)
       | Pfloatarray ->
@@ -1238,45 +1326,47 @@ and transl_prim_2 p arg1 arg2 dbg =
           bind "index" (transl arg2) (fun idx ->
             bind "arr" (transl arg1) (fun arr ->
               bind "header" (header arr) (fun hdr ->
-                Cifthenelse(is_addr_array_hdr hdr,
-                  Csequence(Cop(Ccheckbound dbg, [addr_array_length hdr; idx]),
-                            addr_array_ref arr idx),
-                  Csequence(Cop(Ccheckbound dbg, [float_array_length hdr; idx]),
-                            float_array_ref arr idx)))))
+                mk(Cifthenelse(is_addr_array_hdr hdr,
+                               mk(Csequence(mk(Cop(Ccheckbound, [addr_array_length hdr; idx])),
+                                            addr_array_ref arr idx)),
+                               mk(Csequence(mk(Cop(Ccheckbound, [float_array_length hdr; idx])),
+                                            float_array_ref arr idx)))))))
       | Paddrarray | Pintarray ->
           bind "index" (transl arg2) (fun idx ->
             bind "arr" (transl arg1) (fun arr ->
-              Csequence(Cop(Ccheckbound dbg, [addr_array_length(header arr); idx]),
-                        addr_array_ref arr idx)))
+              mk(Csequence
+                   (mk(Cop(Ccheckbound, [addr_array_length(header arr); idx])),
+                    addr_array_ref arr idx))))
       | Pfloatarray ->
           box_float(
             bind "index" (transl arg2) (fun idx ->
               bind "arr" (transl arg1) (fun arr ->
-                Csequence(Cop(Ccheckbound dbg,
-                              [float_array_length(header arr); idx]),
-                          unboxed_float_array_ref arr idx))))
+                mk(Csequence
+                     (mk(Cop(Ccheckbound, [float_array_length(header arr); idx])),
+                      unboxed_float_array_ref arr idx)))))
       end
 
   (* Operations on bitvects *)
   | Pbittest ->
       bind "index" (untag_int(transl arg2)) (fun idx ->
         tag_int(
-          Cop(Cand, [Cop(Clsr, [Cop(Cload Byte_unsigned,
-                                    [add_int (transl arg1)
-                                      (Cop(Clsr, [idx; Cconst_int 3]))]);
-                                Cop(Cand, [idx; Cconst_int 7])]);
-                     Cconst_int 1])))
+          mk(Cop(Cand, [mk(Cop(Clsr,
+                               [mk(Cop(Cload Byte_unsigned,
+                                       [add_int (transl arg1)
+                                           (mk(Cop(Clsr, [idx; mk(Cconst_int 3)])))]));
+                                mk(Cop(Cand, [idx; mk(Cconst_int 7)]))]));
+                        mk(Cconst_int 1)]))))
 
   (* Boxed integers *)
   | Paddbint bi ->
-      box_int bi (Cop(Caddi,
-                      [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Caddi,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Psubbint bi ->
-      box_int bi (Cop(Csubi,
-                      [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Csubi,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Pmulbint bi ->
-      box_int bi (Cop(Cmuli,
-                      [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Cmuli,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Pdivbint bi ->
       box_int bi (safe_divmod Cdivi
                       (transl_unbox_int bi arg1) (transl_unbox_int bi arg2)
@@ -1286,45 +1376,46 @@ and transl_prim_2 p arg1 arg2 dbg =
                       (transl_unbox_int bi arg1) (transl_unbox_int bi arg2)
                       dbg)
   | Pandbint bi ->
-      box_int bi (Cop(Cand,
-                     [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Cand,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Porbint bi ->
-      box_int bi (Cop(Cor,
-                     [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Cor,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Pxorbint bi ->
-      box_int bi (Cop(Cxor,
-                     [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      box_int bi (mk(Cop(Cxor,
+                         [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | Plslbint bi ->
-      box_int bi (Cop(Clsl,
-                     [transl_unbox_int bi arg1; untag_int(transl arg2)]))
+      box_int bi (mk(Cop(Clsl,
+                         [transl_unbox_int bi arg1; untag_int(transl arg2)])))
   | Plsrbint bi ->
-      box_int bi (Cop(Clsr,
-                     [make_unsigned_int bi (transl_unbox_int bi arg1);
-                      untag_int(transl arg2)]))
+      box_int bi (mk(Cop(Clsr,
+                         [make_unsigned_int bi (transl_unbox_int bi arg1);
+                          untag_int(transl arg2)])))
   | Pasrbint bi ->
-      box_int bi (Cop(Casr,
-                     [transl_unbox_int bi arg1; untag_int(transl arg2)]))
+      box_int bi (mk(Cop(Casr,
+                         [transl_unbox_int bi arg1; untag_int(transl arg2)])))
   | Pbintcomp(bi, cmp) ->
-      tag_int (Cop(Ccmpi(transl_comparison cmp),
-                     [transl_unbox_int bi arg1; transl_unbox_int bi arg2]))
+      tag_int (mk(Cop(Ccmpi(transl_comparison cmp),
+                      [transl_unbox_int bi arg1; transl_unbox_int bi arg2])))
   | _ ->
       fatal_error "Cmmgen.transl_prim_2"
 
 and transl_prim_3 p arg1 arg2 arg3 dbg =
+  let mk = mkdbg dbg in
   match p with
   (* String operations *)
     Pstringsetu ->
-      return_unit(Cop(Cstore Byte_unsigned,
-                      [add_int (transl arg1) (untag_int(transl arg2));
-                        untag_int(transl arg3)]))
+      return_unit(mk(Cop(Cstore Byte_unsigned,
+                         [add_int (transl arg1) (untag_int(transl arg2));
+                          untag_int(transl arg3)])))
   | Pstringsets ->
       return_unit
         (bind "str" (transl arg1) (fun str ->
           bind "index" (untag_int (transl arg2)) (fun idx ->
-            Csequence(
-              Cop(Ccheckbound dbg, [string_length str; idx]),
-              Cop(Cstore Byte_unsigned,
-                  [add_int str idx; untag_int(transl arg3)])))))
+            mk(Csequence(
+              mk(Cop(Ccheckbound, [string_length str; idx])),
+              mk(Cop(Cstore Byte_unsigned,
+                  [add_int str idx; untag_int(transl arg3)])))))))
 
   (* Array operations *)
   | Parraysetu kind ->
@@ -1333,9 +1424,9 @@ and transl_prim_3 p arg1 arg2 arg3 dbg =
           bind "newval" (transl arg3) (fun newval ->
             bind "index" (transl arg2) (fun index ->
               bind "arr" (transl arg1) (fun arr ->
-                Cifthenelse(is_addr_array_ptr arr,
-                            addr_array_set arr index newval,
-                            float_array_set arr index (unbox_float newval)))))
+                mk(Cifthenelse(is_addr_array_ptr arr,
+                               addr_array_set arr index newval,
+                               float_array_set arr index (unbox_float newval))))))
       | Paddrarray ->
           addr_array_set (transl arg1) (transl arg2) (transl arg3)
       | Pintarray ->
@@ -1350,46 +1441,53 @@ and transl_prim_3 p arg1 arg2 arg3 dbg =
             bind "index" (transl arg2) (fun idx ->
               bind "arr" (transl arg1) (fun arr ->
                 bind "header" (header arr) (fun hdr ->
-                  Cifthenelse(is_addr_array_hdr hdr,
-                    Csequence(Cop(Ccheckbound dbg, [addr_array_length hdr; idx]),
-                              addr_array_set arr idx newval),
-                    Csequence(Cop(Ccheckbound dbg, [float_array_length hdr; idx]),
-                              float_array_set arr idx
-                                              (unbox_float newval)))))))
+                  mk(Cifthenelse
+                       (is_addr_array_hdr hdr,
+                        mk(Csequence
+                          (mk(Cop(Ccheckbound, [addr_array_length hdr; idx])),
+                           addr_array_set arr idx newval)),
+                        mk(Csequence
+                          (mk(Cop(Ccheckbound, [float_array_length hdr; idx])),
+                           float_array_set arr idx (unbox_float newval)))))))))
       | Paddrarray ->
           bind "index" (transl arg2) (fun idx ->
             bind "arr" (transl arg1) (fun arr ->
-              Csequence(Cop(Ccheckbound dbg, [addr_array_length(header arr); idx]),
-                        addr_array_set arr idx (transl arg3))))
+              mk(Csequence
+                (mk(Cop(Ccheckbound,[addr_array_length(header arr); idx])),
+                 addr_array_set arr idx (transl arg3)))))
       | Pintarray ->
           bind "index" (transl arg2) (fun idx ->
             bind "arr" (transl arg1) (fun arr ->
-              Csequence(Cop(Ccheckbound dbg, [addr_array_length(header arr); idx]),
-                        int_array_set arr idx (transl arg3))))
+              mk(Csequence
+                (mk(Cop(Ccheckbound, [addr_array_length(header arr); idx])),
+                 int_array_set arr idx (transl arg3)))))
       | Pfloatarray ->
           bind "index" (transl arg2) (fun idx ->
             bind "arr" (transl arg1) (fun arr ->
-              Csequence(Cop(Ccheckbound dbg, [float_array_length(header arr);idx]),
-                        float_array_set arr idx (transl_unbox_float arg3))))
+              mk(Csequence
+                (mk(Cop(Ccheckbound, [float_array_length(header arr);idx])),
+                 float_array_set arr idx (transl_unbox_float arg3)))))
       end)
   | _ ->
     fatal_error "Cmmgen.transl_prim_3"
 
 and transl_unbox_float ulam =
+  let mk = mkdbg ulam.dbg in
   match ulam.exp with
-    Uconst(Const_base(Const_float f)) -> Cconst_float f
+    Uconst(Const_base(Const_float f)) -> mk(Cconst_float f)
   | _ -> unbox_float(transl ulam)
 
 and transl_unbox_int bi ulam =
+  let mk = mkdbg ulam.dbg in
   match ulam.exp with
     Uconst(Const_base(Const_int32 n)) ->
-      Cconst_natint (Nativeint.of_int32 n)
+      mk(Cconst_natint (Nativeint.of_int32 n))
   | Uconst(Const_base(Const_nativeint n)) ->
-      Cconst_natint n
+      mk(Cconst_natint n)
   | Uconst(Const_base(Const_int64 n)) ->
-      assert (size_int = 8); Cconst_natint (Int64.to_nativeint n)
+      assert (size_int = 8); mk(Cconst_natint (Int64.to_nativeint n))
   | Uprim(Pbintofint bi', [{exp=Uconst(Const_base(Const_int i))}]) when bi = bi' ->
-      Cconst_int i
+      mk(Cconst_int i)
   | _ -> unbox_int bi (transl ulam)
 
 and transl_unbox_let box_fn unbox_fn transl_unbox_fn id exp body =
@@ -1397,43 +1495,48 @@ and transl_unbox_let box_fn unbox_fn transl_unbox_fn id exp body =
   let trbody1 = transl body in
   let (trbody2, need_boxed, is_assigned) =
     subst_boxed_number unbox_fn id unboxed_id trbody1 in
+  let mk = mkdbg exp.dbg in
   if need_boxed && is_assigned then
-    Clet(id, transl exp, trbody1)
+    mk(Clet(id, transl exp, trbody1))
   else
-    Clet(unboxed_id, transl_unbox_fn exp,
-         if need_boxed
-         then Clet(id, box_fn(Cvar unboxed_id), trbody2)
-         else trbody2)
+    mk(Clet(unboxed_id, transl_unbox_fn exp,
+            if need_boxed
+            then mk(Clet(id, box_fn(mk(Cvar unboxed_id)), trbody2))
+            else trbody2))
 
-and make_catch ncatch body handler = match body with
-| Cexit (nexit,[]) when nexit=ncatch -> handler
-| _ ->  Ccatch (ncatch, [], body, handler)
+and make_catch ncatch body handler =
+  let mk = mkdbg body.dbg in
+  match body.exp with
+  | Cexit (nexit,[]) when nexit=ncatch -> handler
+  | _ ->  mk(Ccatch (ncatch, [], body, handler))
 
-and make_catch2 mk_body handler = match handler with
-| Cexit (_,[])|Ctuple []|Cconst_int _|Cconst_pointer _ ->
-    mk_body handler
-| _ ->
+and make_catch2 mk_body handler =
+  let mk = mkdbg handler.dbg in
+  match handler.exp with
+  | Cexit (_,[])|Ctuple []|Cconst_int _|Cconst_pointer _ -> mk_body handler
+  | _ ->
     let nfail = next_raise_count () in
     make_catch
       nfail
-      (mk_body (Cexit (nfail,[])))
+      (mk_body (mk(Cexit (nfail,[]))))
       handler
 
 and exit_if_true cond nfail otherwise =
+  let mk = mkdbg cond.dbg in
   match cond.exp with
   | Uconst (Const_pointer 0) -> otherwise
-  | Uconst (Const_pointer 1) -> Cexit (nfail,[])
+  | Uconst (Const_pointer 1) -> mk(Cexit (nfail,[]))
   | Uprim(Psequor, [arg1; arg2]) ->
       exit_if_true arg1 nfail (exit_if_true arg2 nfail otherwise)
   | Uprim(Psequand, _) ->
-      begin match otherwise with
+      begin match otherwise.exp with
       | Cexit (raise_num,[]) ->
-          exit_if_false cond (Cexit (nfail,[])) raise_num
+          exit_if_false cond (mk(Cexit (nfail,[]))) raise_num
       | _ ->
           let raise_num = next_raise_count () in
           make_catch
             raise_num
-            (exit_if_false cond (Cexit (nfail,[])) raise_num)
+            (exit_if_false cond (mk(Cexit (nfail,[]))) raise_num)
             otherwise
       end
   | Uprim(Pnot, [arg]) ->
@@ -1441,29 +1544,30 @@ and exit_if_true cond nfail otherwise =
   | Uifthenelse (cond, ifso, ifnot) ->
       make_catch2
         (fun shared ->
-          Cifthenelse
-            (test_bool (transl cond),
-             exit_if_true ifso nfail shared,
-             exit_if_true ifnot nfail shared))
+          mk(Cifthenelse
+               (test_bool (transl cond),
+                exit_if_true ifso nfail shared,
+                exit_if_true ifnot nfail shared)))
         otherwise
   | _ ->
-      Cifthenelse(test_bool(transl cond), Cexit (nfail, []), otherwise)
+      mk(Cifthenelse(test_bool(transl cond), mk(Cexit (nfail, [])), otherwise))
 
 and exit_if_false cond otherwise nfail =
+  let mk = mkdbg cond.dbg in
   match cond.exp with
-  | Uconst (Const_pointer 0) -> Cexit (nfail,[])
+  | Uconst (Const_pointer 0) -> mk(Cexit (nfail,[]))
   | Uconst (Const_pointer 1) -> otherwise
   | Uprim(Psequand, [arg1; arg2]) ->
       exit_if_false arg1 (exit_if_false arg2 otherwise nfail) nfail
   | Uprim(Psequor, _) ->
-      begin match otherwise with
+      begin match otherwise.exp with
       | Cexit (raise_num,[]) ->
-          exit_if_true cond raise_num (Cexit (nfail,[]))
+          exit_if_true cond raise_num (mk(Cexit (nfail,[])))
       | _ ->
           let raise_num = next_raise_count () in
           make_catch
             raise_num
-            (exit_if_true cond raise_num (Cexit (nfail,[])))
+            (exit_if_true cond raise_num (mk(Cexit (nfail,[]))))
             otherwise
       end
   | Uprim(Pnot, [arg]) ->
@@ -1471,13 +1575,13 @@ and exit_if_false cond otherwise nfail =
   | Uifthenelse (cond, ifso, ifnot) ->
       make_catch2
         (fun shared ->
-          Cifthenelse
-            (test_bool (transl cond),
-             exit_if_false ifso shared nfail,
-             exit_if_false ifnot shared nfail))
+          mk(Cifthenelse
+               (test_bool (transl cond),
+                exit_if_false ifso shared nfail,
+                exit_if_false ifnot shared nfail)))
         otherwise
   | _ ->
-      Cifthenelse(test_bool(transl cond), otherwise, Cexit (nfail, []))
+      mk(Cifthenelse(test_bool(transl cond), otherwise, mk(Cexit (nfail, []))))
 
 and transl_switch arg index cases = match Array.length cases with
 | 0 -> fatal_error "Cmmgen.transl_switch"
@@ -1506,7 +1610,7 @@ and transl_switch arg index cases = match Array.length cases with
       (fun a ->
         SwitcherBlocks.zyva
           (0,n_index-1)
-          (fun i -> Cconst_int i)
+          (fun i -> mkdbg arg.dbg (Cconst_int i))
           a
           (Array.of_list !inters) actions)
 
@@ -1515,22 +1619,23 @@ and transl_letrec bindings cont =
   let rec init_blocks = function
     | [] -> fill_nonrec bsz
     | (id, exp, RHS_block sz) :: rem ->
-        Clet(id, Cop(Cextcall("caml_alloc_dummy", typ_addr, true, Debuginfo.none),
-                     [int_const sz]),
-             init_blocks rem)
+        mk(Clet
+             (id,
+              mk(Cop(Cextcall("caml_alloc_dummy", typ_addr, true), [mk(int_const sz)])),
+              init_blocks rem))
     | (id, exp, RHS_nonrec) :: rem ->
-        Clet (id, Cconst_int 0, init_blocks rem)
+        mk(Clet (id, mk(Cconst_int 0), init_blocks rem))
   and fill_nonrec = function
     | [] -> fill_blocks bsz
     | (id, exp, RHS_block sz) :: rem -> fill_nonrec rem
     | (id, exp, RHS_nonrec) :: rem ->
-        Clet (id, transl exp, fill_nonrec rem)
+        mk(Clet (id, transl exp, fill_nonrec rem))
   and fill_blocks = function
     | [] -> cont
     | (id, exp, RHS_block _) :: rem ->
-        Csequence(Cop(Cextcall("caml_update_dummy", typ_void, false, Debuginfo.none),
-                      [Cvar id; transl exp]),
-                  fill_blocks rem)
+        mk(Csequence
+             (mk(Cop(Cextcall("caml_update_dummy", typ_void, false), [mk(Cvar id); transl exp])),
+              fill_blocks rem))
     | (id, exp, RHS_nonrec) :: rem ->
         fill_blocks rem
   in init_blocks bsz
@@ -1769,37 +1874,37 @@ let cache_public_method meths tag cache =
   let raise_num = next_raise_count () in
   let li = Ident.create "li" and hi = Ident.create "hi"
   and mi = Ident.create "mi" and tagged = Ident.create "tagged" in
-  Clet (
-  li, Cconst_int 3,
-  Clet (
-  hi, Cop(Cload Word, [meths]),
-  Csequence(
-  Ccatch
+  mk(Clet (
+  li, mk(Cconst_int 3),
+  mk(Clet (
+  hi, mk(Cop(Cload Word, [meths])),
+  mk(Csequence(
+  mk(Ccatch
     (raise_num, [],
-     Cloop
-       (Clet(
+     mk(Cloop
+       (mk(Clet(
         mi,
-        Cop(Cor,
-            [Cop(Clsr, [Cop(Caddi, [Cvar li; Cvar hi]); Cconst_int 1]);
-             Cconst_int 1]),
-        Csequence(
-        Cifthenelse
-          (Cop (Ccmpi Clt,
+        mk(Cop(Cor,
+            [mk(Cop(Clsr, [mk(Cop(Caddi, [mk(Cvar li); mk(Cvar hi)])); mk(Cconst_int 1)]));
+             mk(Cconst_int 1)])),
+        mk(Csequence(
+        mk(Cifthenelse
+          (mk(Cop (Ccmpi Clt,
                 [tag;
-                 Cop(Cload Word,
-                     [Cop(Cadda,
-                          [meths; lsl_const (Cvar mi) log2_size_addr])])]),
-           Cassign(hi, Cop(Csubi, [Cvar mi; Cconst_int 2])),
-           Cassign(li, Cvar mi)),
-        Cifthenelse
-          (Cop(Ccmpi Cge, [Cvar li; Cvar hi]), Cexit (raise_num, []),
-           Ctuple [])))),
-     Ctuple []),
-  Clet (
-  tagged, Cop(Cadda, [lsl_const (Cvar li) log2_size_addr;
-                      Cconst_int(1 - 3 * size_addr)]),
-  Csequence(Cop (Cstore Word, [cache; Cvar tagged]),
-            Cvar tagged)))))
+                 mk(Cop(Cload Word,
+                     [mk(Cop(Cadda,
+                          [meths; lsl_const (mk(Cvar mi)) log2_size_addr]))]))])),
+           mk(Cassign(hi, mk(Cop(Csubi, [mk(Cvar mi); mk(Cconst_int 2)])))),
+           mk(Cassign(li, mk(Cvar mi))))),
+        mk(Cifthenelse
+          (mk(Cop(Ccmpi Cge, [mk(Cvar li); mk(Cvar hi)])), mk(Cexit (raise_num, [])),
+           mk(Ctuple []))))))))),
+     mk(Ctuple []))),
+  mk(Clet (
+  tagged, mk(Cop(Cadda, [lsl_const (mk(Cvar li)) log2_size_addr;
+                      mk(Cconst_int(1 - 3 * size_addr))])),
+  mk(Csequence(mk(Cop (Cstore Word, [cache; mk(Cvar tagged)])),
+               mk(Cvar tagged)))))))))))
 
 (* Generate an application function:
      (defun caml_applyN (a1 ... aN clos)
@@ -1818,24 +1923,24 @@ let apply_function_body arity =
   let clos = Ident.create "clos" in
   let rec app_fun clos n =
     if n = arity-1 then
-      Cop(Capply(typ_addr, Debuginfo.none),
-          [get_field (Cvar clos) 0; Cvar arg.(n); Cvar clos])
+      mk(Cop(Capply typ_addr,
+          [get_field (mk(Cvar clos)) 0; mk(Cvar arg.(n)); mk(Cvar clos)]))
     else begin
       let newclos = Ident.create "clos" in
-      Clet(newclos,
-           Cop(Capply(typ_addr, Debuginfo.none),
-               [get_field (Cvar clos) 0; Cvar arg.(n); Cvar clos]),
-           app_fun newclos (n+1))
+      mk(Clet(newclos,
+           mk(Cop(Capply typ_addr,
+                  [get_field (mk(Cvar clos)) 0; mk(Cvar arg.(n)); mk(Cvar clos)])),
+              app_fun newclos (n+1)))
     end in
   let args = Array.to_list arg in
   let all_args = args @ [clos] in
   (args, clos,
    if arity = 1 then app_fun clos 0 else
-   Cifthenelse(
-   Cop(Ccmpi Ceq, [get_field (Cvar clos) 1; int_const arity]),
-   Cop(Capply(typ_addr, Debuginfo.none),
-       get_field (Cvar clos) 2 :: List.map (fun s -> Cvar s) all_args),
-   app_fun clos 0))
+   mk(Cifthenelse(
+   mk(Cop(Ccmpi Ceq, [get_field (mk(Cvar clos)) 1; mk(int_const arity)])),
+   mk(Cop(Capply typ_addr,
+      get_field (mk(Cvar clos)) 2 :: List.map (fun s -> mk(Cvar s)) all_args)),
+   app_fun clos 0)))
 
 let send_function arity =
   let (args, clos', body) = apply_function_body (1+arity) in
@@ -1843,28 +1948,31 @@ let send_function arity =
   and obj = List.hd args
   and tag = Ident.create "tag" in
   let clos =
-    let cache = Cvar cache and obj = Cvar obj and tag = Cvar tag in
+    let cache = mk(Cvar cache)
+    and obj = mk(Cvar obj)
+    and tag = mk(Cvar tag) in
     let meths = Ident.create "meths" and cached = Ident.create "cached" in
     let real = Ident.create "real" in
-    let mask = get_field (Cvar meths) 1 in
-    let cached_pos = Cvar cached in
-    let tag_pos = Cop(Cadda, [Cop (Cadda, [cached_pos; Cvar meths]);
-                              Cconst_int(3*size_addr-1)]) in
-    let tag' = Cop(Cload Word, [tag_pos]) in
-    Clet (
-    meths, Cop(Cload Word, [obj]),
-    Clet (
-    cached, Cop(Cand, [Cop(Cload Word, [cache]); mask]),
-    Clet (
+    let mask = get_field (mk(Cvar meths)) 1 in
+    let cached_pos = mk(Cvar cached) in
+    let tag_pos = mk(Cop(Cadda, [mk(Cop (Cadda, [cached_pos; mk(Cvar meths)]));
+                                 mk(Cconst_int(3*size_addr-1))])) in
+    let tag' = mk(Cop(Cload Word, [tag_pos])) in
+    mk(Clet (
+    meths, mk(Cop(Cload Word, [obj])),
+    mk(Clet (
+    cached, mk(Cop(Cand, [mk(Cop(Cload Word, [cache])); mask])),
+    mk(Clet (
     real,
-    Cifthenelse(Cop(Ccmpa Cne, [tag'; tag]),
-                cache_public_method (Cvar meths) tag cache,
-                cached_pos),
-    Cop(Cload Word, [Cop(Cadda, [Cop (Cadda, [Cvar real; Cvar meths]);
-                                 Cconst_int(2*size_addr-1)])]))))
-
+    mk(Cifthenelse(mk(Cop(Ccmpa Cne, [tag'; tag])),
+                   cache_public_method (mk(Cvar meths)) tag cache,
+                   cached_pos)),
+    mk(Cop(Cload Word,
+           [mk(Cop(Cadda,
+                   [mk(Cop (Cadda, [mk(Cvar real); mk(Cvar meths)]));
+                    mk(Cconst_int(2*size_addr-1))]))]))))))))
   in
-  let body = Clet(clos', clos, body) in
+  let body = mk(Clet(clos', clos, body)) in
   let fun_args =
     [obj, typ_addr; tag, typ_int; cache, typ_addr]
     @ List.map (fun id -> (id, typ_addr)) (List.tl args) in
@@ -1895,13 +2003,13 @@ let tuplify_function arity =
   let rec access_components i =
     if i >= arity
     then []
-    else get_field (Cvar arg) i :: access_components(i+1) in
+    else get_field (mk(Cvar arg)) i :: access_components(i+1) in
   Cfunction
    {fun_name = "caml_tuplify" ^ string_of_int arity;
     fun_args = [arg, typ_addr; clos, typ_addr];
     fun_body =
-      Cop(Capply(typ_addr, Debuginfo.none),
-          get_field (Cvar clos) 2 :: access_components 0 @ [Cvar clos]);
+      mk(Cop(Capply typ_addr,
+             get_field (mk(Cvar clos)) 2 :: access_components 0 @ [mk(Cvar clos)]));
     fun_fast = true;
     fun_dbg  = Debuginfo.none }
 
@@ -1925,14 +2033,14 @@ let final_curry_function arity =
   let last_clos = Ident.create "clos" in
   let rec curry_fun args clos n =
     if n = 0 then
-      Cop(Capply(typ_addr, Debuginfo.none),
-          get_field (Cvar clos) 2 ::
-          args @ [Cvar last_arg; Cvar clos])
+      mk(Cop(Capply typ_addr,
+             get_field (mk(Cvar clos)) 2 ::
+               args @ [mk(Cvar last_arg); mk(Cvar clos)]))
     else begin
       let newclos = Ident.create "clos" in
-      Clet(newclos,
-           get_field (Cvar clos) 3,
-           curry_fun (get_field (Cvar clos) 2 :: args) newclos (n-1))
+      mk(Clet(newclos,
+           get_field (mk(Cvar clos)) 3,
+           curry_fun (get_field (mk(Cvar clos)) 2 :: args) newclos (n-1)))
     end in
   Cfunction
    {fun_name = "caml_curry" ^ string_of_int arity ^
@@ -1952,10 +2060,10 @@ let rec intermediate_curry_functions arity num =
     Cfunction
      {fun_name = name2;
       fun_args = [arg, typ_addr; clos, typ_addr];
-      fun_body = Cop(Calloc,
-                     [alloc_closure_header 4;
-                      Cconst_symbol(name1 ^ "_" ^ string_of_int (num+1));
-                      int_const 1; Cvar arg; Cvar clos]);
+      fun_body = mk(Cop(Calloc,
+                        [mk(alloc_closure_header 4);
+                         mk(Cconst_symbol(name1 ^ "_" ^ string_of_int (num+1)));
+                         mk(int_const 1); mk(Cvar arg); mk(Cvar clos)]));
       fun_fast = true;
       fun_dbg  = Debuginfo.none }
     :: intermediate_curry_functions arity (num+1)
@@ -1995,18 +2103,18 @@ let generic_functions shared units =
 
 let entry_point namelist =
   let incr_global_inited =
-    Cop(Cstore Word,
-        [Cconst_symbol "caml_globals_inited";
-         Cop(Caddi, [Cop(Cload Word, [Cconst_symbol "caml_globals_inited"]);
-                     Cconst_int 1])]) in
+    mk(Cop(Cstore Word,
+           [mk(Cconst_symbol "caml_globals_inited");
+            mk(Cop(Caddi, [mk(Cop(Cload Word, [mk(Cconst_symbol "caml_globals_inited")]));
+                           mk(Cconst_int 1)]))])) in
   let body =
     List.fold_right
       (fun name next ->
         let entry_sym = Compilenv.make_symbol ~unitname:name (Some "entry") in
-        Csequence(Cop(Capply(typ_void, Debuginfo.none),
-                         [Cconst_symbol entry_sym]),
-                  Csequence(incr_global_inited, next)))
-      namelist (Cconst_int 1) in
+        mk(Csequence(mk(Cop(Capply typ_void,
+                            [mk(Cconst_symbol entry_sym)])),
+                     mk(Csequence(incr_global_inited, next)))))
+      namelist (mk(Cconst_int 1)) in
   Cfunction {fun_name = "caml_program";
              fun_args = [];
              fun_body = body;

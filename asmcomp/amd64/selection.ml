@@ -17,6 +17,7 @@
 open Misc
 open Arch
 open Proc
+open Debuginfo
 open Cmm
 open Reg
 open Mach
@@ -31,26 +32,26 @@ type addressing_expr =
   | Ascaledadd of expression * expression * int
 
 let rec select_addr exp =
-  match exp with
+  match exp.exp with
     Cconst_symbol s when not !Clflags.dlcode ->
       (Asymbol s, 0)
-  | Cop((Caddi | Cadda), [arg; Cconst_int m]) ->
+  | Cop((Caddi | Cadda), [arg; {exp=Cconst_int m}]) ->
       let (a, n) = select_addr arg in (a, n + m)
-  | Cop((Csubi | Csuba), [arg; Cconst_int m]) ->
+  | Cop((Csubi | Csuba), [arg; {exp=Cconst_int m}]) ->
       let (a, n) = select_addr arg in (a, n - m)
-  | Cop((Caddi | Cadda), [Cconst_int m; arg]) ->
+  | Cop((Caddi | Cadda), [{exp=Cconst_int m}; arg]) ->
       let (a, n) = select_addr arg in (a, n + m)
-  | Cop(Clsl, [arg; Cconst_int(1|2|3 as shift)]) ->
+  | Cop(Clsl, [arg; {exp=Cconst_int(1|2|3 as shift)}]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, 1 lsl shift), n lsl shift)
       | _ -> (Alinear exp, 0)
       end
-  | Cop(Cmuli, [arg; Cconst_int(2|4|8 as mult)]) ->
+  | Cop(Cmuli, [arg; {exp=Cconst_int(2|4|8 as mult)}]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, mult), n * mult)
       | _ -> (Alinear exp, 0)
       end
-  | Cop(Cmuli, [Cconst_int(2|4|8 as mult); arg]) ->
+  | Cop(Cmuli, [{exp=Cconst_int(2|4|8 as mult)}; arg]) ->
       begin match select_addr arg with
         (Alinear e, n) -> (Ascale(e, mult), n * mult)
       | _ -> (Alinear exp, 0)
@@ -70,8 +71,8 @@ let rec select_addr exp =
         | _ ->
               (Aadd(arg1, arg2), 0)
       end
-  | arg ->
-      (Alinear arg, 0)
+  | _ ->
+      (Alinear exp, 0)
 
 (* Special constraints on operand and result registers *)
 
@@ -122,34 +123,36 @@ method is_immediate n = n <= 0x7FFFFFFF && n >= -0x80000000
 method is_immediate_natint n = n <= 0x7FFFFFFFn && n >= -0x80000000n
 
 method select_addressing exp =
+  let mk = mkdbg exp.Debuginfo.dbg in
   let (a, d) = select_addr exp in
   (* PR#4625: displacement must be a signed 32-bit immediate *)
   if d < -0x8000_0000 || d > 0x7FFF_FFFF
   then (Iindexed 0, exp)
   else match a with
     | Asymbol s ->
-        (Ibased(s, d), Ctuple [])
+        (Ibased(s, d), mk(Ctuple []))
     | Alinear e ->
         (Iindexed d, e)
     | Aadd(e1, e2) ->
-        (Iindexed2 d, Ctuple[e1; e2])
+        (Iindexed2 d, mk(Ctuple[e1; e2]))
     | Ascale(e, scale) ->
         (Iscaled(scale, d), e)
     | Ascaledadd(e1, e2, scale) ->
-        (Iindexed2scaled(scale, d), Ctuple[e1; e2])
+        (Iindexed2scaled(scale, d), mk(Ctuple[e1; e2]))
 
 method! select_store addr exp =
-  match exp with
+  let mk = mkdbg exp.Debuginfo.dbg in
+  match exp.exp with
     Cconst_int n when self#is_immediate n ->
-      (Ispecific(Istore_int(Nativeint.of_int n, addr)), Ctuple [])
+      (Ispecific(Istore_int(Nativeint.of_int n, addr)), mk(Ctuple []))
   | Cconst_natint n when self#is_immediate_natint n ->
-      (Ispecific(Istore_int(n, addr)), Ctuple [])
+      (Ispecific(Istore_int(n, addr)), mk(Ctuple []))
   | Cconst_pointer n when self#is_immediate n ->
-      (Ispecific(Istore_int(Nativeint.of_int n, addr)), Ctuple [])
+      (Ispecific(Istore_int(Nativeint.of_int n, addr)), mk(Ctuple []))
   | Cconst_natpointer n when self#is_immediate_natint n ->
-      (Ispecific(Istore_int(n, addr)), Ctuple [])
+      (Ispecific(Istore_int(n, addr)), mk(Ctuple []))
   | Cconst_symbol s when not (!pic_code || !Clflags.dlcode) ->
-      (Ispecific(Istore_symbol(s, addr)), Ctuple [])
+      (Ispecific(Istore_symbol(s, addr)), mk(Ctuple []))
   | _ ->
       super#select_store addr exp
 
@@ -157,7 +160,7 @@ method! select_operation op args =
   match op with
   (* Recognize the LEA instruction *)
     Caddi | Cadda | Csubi | Csuba ->
-      begin match self#select_addressing (Cop(op, args)) with
+      begin match self#select_addressing (mk(Cop(op, args))) with
         (Iindexed d, _) -> super#select_operation op args
       | (Iindexed2 0, _) -> super#select_operation op args
       | (addr, arg) -> (Ispecific(Ilea addr), [arg])
@@ -165,14 +168,14 @@ method! select_operation op args =
   (* Recognize (x / cst) and (x % cst) only if cst is a power of 2. *)
   | Cdivi ->
       begin match args with
-        [arg1; Cconst_int n] when self#is_immediate n
+        [arg1; {exp=Cconst_int n}] when self#is_immediate n
                                && n = 1 lsl (Misc.log2 n) ->
           (Iintop_imm(Idiv, n), [arg1])
       | _ -> (Iintop Idiv, args)
       end
   | Cmodi ->
       begin match args with
-        [arg1; Cconst_int n] when self#is_immediate n
+        [arg1; {exp=Cconst_int n}] when self#is_immediate n
                                && n = 1 lsl (Misc.log2 n) ->
           (Iintop_imm(Imod, n), [arg1])
       | _ -> (Iintop Imod, args)
@@ -189,7 +192,7 @@ method! select_operation op args =
   (* Recognize store instructions *)
   | Cstore Word ->
       begin match args with
-        [loc; Cop(Caddi, [Cop(Cload _, [loc']); Cconst_int n])]
+        [loc; {exp=Cop(Caddi, [{exp=Cop(Cload _, [loc'])}; {exp=Cconst_int n}])}]
         when loc = loc' && self#is_immediate n ->
           let (addr, arg) = self#select_addressing loc in
           (Ispecific(Ioffset_loc(n, addr)), [arg])
@@ -202,11 +205,11 @@ method! select_operation op args =
 
 method select_floatarith commutative regular_op mem_op args =
   match args with
-    [arg1; Cop(Cload (Double|Double_u), [loc2])] ->
+    [arg1; {exp=Cop(Cload (Double|Double_u), [loc2])}] ->
       let (addr, arg2) = self#select_addressing loc2 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg1; arg2])
-  | [Cop(Cload (Double|Double_u), [loc1]); arg2] when commutative ->
+  | [{exp=Cop(Cload (Double|Double_u), [loc1])}; arg2] when commutative ->
       let (addr, arg1) = self#select_addressing loc1 in
       (Ispecific(Ifloatarithmem(mem_op, addr)),
                  [arg2; arg1])
@@ -217,18 +220,15 @@ method select_floatarith commutative regular_op mem_op args =
 
 (* Deal with register constraints *)
 
-method! insert_op_debug op dbg rs rd =
+method! insert_op op dbg rs rd =
   try
     let (rsrc, rdst) = pseudoregs_for_operation op rs rd in
-    self#insert_moves rs rsrc;
-    self#insert_debug (Iop op) dbg rsrc rdst;
-    self#insert_moves rdst rd;
+    self#insert_moves dbg rs rsrc;
+    self#insert (Iop op) dbg rsrc rdst;
+    self#insert_moves dbg rdst rd;
     rd
   with Use_default ->
-    super#insert_op_debug op dbg rs rd
-
-method! insert_op op rs rd =
-  self#insert_op_debug op Debuginfo.none rs rd
+    super#insert_op op dbg rs rd
 
 end
 
